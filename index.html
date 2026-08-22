@@ -1864,12 +1864,12 @@ function renderDayContent(c, dayType, isCoach){
   return `
   ${summaryHTML}
   <div class="card" data-daytype="${dayType}" id="mealDayCard">
-    ${meals.map((meal,mi)=>renderMealBlockUnified(c, dayType, meal, mi, isCoach)).join('')}
+    ${meals.map((meal,mi)=>renderMealBlockUnified(c, dayType, meal, mi, isCoach, meals.length)).join('')}
     ${isCoach ? `<button type="button" class="btn-sm btn-ghost" onclick="addMealToDay('${c.id}','${dayType}')">+ Add Meal</button>` : `
     <div class="row" style="margin-top:4px;"><button type="button" class="btn-sm btn-ghost" onclick="resetClientMealLog('${c.id}','${dayType}')">Reset to Coach's Plan</button></div>`}
   </div>`;
 }
-function renderMealBlockUnified(c, dayType, meal, mi, isCoach){
+function renderMealBlockUnified(c, dayType, meal, mi, isCoach, mealCount){
   const total = {cals:macroSum(meal.items,'cals'), protein:macroSum(meal.items,'protein'), carbs:macroSum(meal.items,'carbs'), fats:macroSum(meal.items,'fats')};
   const prescribedMeal = isCoach ? meal : (prescribedMealsFor(c, dayType)[mi] || {items:[],instructions:''});
   let macroLine;
@@ -1882,30 +1882,32 @@ function renderMealBlockUnified(c, dayType, meal, mi, isCoach){
   const instructions = prescribedMeal.instructions || '';
   const target = isCoach ? 'plan' : 'log';
   const popId = `copyPop_${dayType}_${mi}`;
-  const otherDayTypes = isCoach ? dayTypesFor(c).filter(([k])=>k!==dayType) : [];
   return `
   <div class="meal-block" data-meal-idx="${mi}">
     <div class="meal-block-header">
+      ${isCoach && mealCount>1 ? `<span class="drag-handle" style="margin-top:6px;" onpointerdown="startMealBlockDrag(event,'${c.id}','${dayType}')" aria-label="Drag to reorder meal">&#10022;&#10022;</span>` : ''}
       <div style="flex:1;min-width:0;">
         ${isCoach ? `<input type="text" class="meal-name" value="${(meal.name||'').replace(/"/g,'&quot;')}" placeholder="Meal name" onchange="renameMeal('${c.id}','${dayType}',${mi},this.value)">` : `<h4 style="margin:0;">${escapeHtml(meal.name)}${meal.time?` <span class="muted" style="font-weight:400;">— ${escapeHtml(meal.time)}</span>`:''}</h4>`}
         <div class="meal-header-macros">${macroLine}</div>
       </div>
       ${isCoach ? `<div style="display:flex;gap:6px;flex-shrink:0;">
-        <button type="button" class="icon-btn" onclick="toggleMealCopyPopover('${popId}')" aria-label="Copy meal">&#128203;</button>
+        <button type="button" class="icon-btn" onclick="toggleMealCopyPopover('${popId}','${c.id}','${dayType}',${mi})" aria-label="Copy meal">&#128203;</button>
         <button type="button" class="icon-btn icon-btn-danger" onclick="deleteMeal('${c.id}','${dayType}',${mi})" aria-label="Delete meal">&#128465;</button>
       </div>` : ''}
     </div>
     ${isCoach ? `
     <div class="meal-copy-popover" id="${popId}" style="display:none;">
-      <button type="button" class="btn-sm btn-ghost" style="width:100%;text-align:left;" onclick="copyMealToNextSlot('${c.id}','${dayType}',${mi})">&#8594; Copy to Next Meal</button>
-      ${otherDayTypes.length ? `
-      <div class="muted" style="font-size:11px;margin:10px 0 6px;">or copy to a different day:</div>
-      <div class="row" style="gap:8px;align-items:center;">
-        <select id="copyDayTarget_${dayType}_${mi}" style="flex:1;">
-          ${otherDayTypes.map(([k,label])=>`<option value="${k}">${escapeHtml(label)}</option>`).join('')}
-        </select>
-        <button type="button" class="btn-sm" onclick="copyMealToDayType('${c.id}','${dayType}',${mi},document.getElementById('copyDayTarget_${dayType}_${mi}').value)">Copy</button>
-      </div>` : `<div class="muted" style="font-size:11px;margin-top:10px;">Add another day type to copy this meal across days.</div>`}
+      <div class="row" style="gap:8px;">
+        <div class="field" style="flex:1;"><label>Copy to day</label>
+          <select id="copyDaySel_${dayType}_${mi}" onchange="updateCopyMealSlotOptions('${c.id}','${dayType}',${mi})">
+            ${dayTypesFor(c).map(([k,label])=>`<option value="${k}"${k===dayType?' selected':''}>${escapeHtml(label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="flex:1;"><label>Copy to meal</label>
+          <select id="copySlotSel_${dayType}_${mi}"></select>
+        </div>
+      </div>
+      <button type="button" class="btn-sm" style="width:100%;" onclick="confirmCopyMeal('${c.id}','${dayType}',${mi})">Copy</button>
     </div>` : ''}
     <div class="meal-food-rows" data-daytype="${dayType}" data-meal-idx="${mi}">
       ${meal.items.length===0 ? `<div class="muted" style="font-size:12.5px;padding:6px 0;">No foods added yet.</div>` : meal.items.map((it,ii)=>mealFoodRow(it, c.id, dayType, mi, ii, target, meal.items.length>1)).join('')}
@@ -2002,47 +2004,70 @@ async function deleteMeal(clientId, dayType, mealIdx){
   showToast('Meal deleted');
   switchMealTab(dayType);
 }
-function toggleMealCopyPopover(id){
+function toggleMealCopyPopover(id, clientId, dayType, mi){
   const el = document.getElementById(id);
   if(!el) return;
   const willOpen = el.style.display === 'none';
   document.querySelectorAll('.meal-copy-popover').forEach(p=>p.style.display='none');
   el.style.display = willOpen ? 'block' : 'none';
+  if(willOpen) updateCopyMealSlotOptions(clientId, dayType, mi);
 }
-async function copyMealToNextSlot(clientId, dayType, mealIdx){
+function updateCopyMealSlotOptions(clientId, dayType, mi){
   const c = getClient(clientId);
-  const meals = prescribedMealsFor(c, dayType);
-  const source = meals[mealIdx];
+  const daySel = document.getElementById(`copyDaySel_${dayType}_${mi}`);
+  const slotSel = document.getElementById(`copySlotSel_${dayType}_${mi}`);
+  if(!daySel || !slotSel) return;
+  const targetDayType = daySel.value;
+  const targetMeals = prescribedMealsFor(c, targetDayType);
+  slotSel.innerHTML = targetMeals.map((m,i)=>`<option value="${i}">${escapeHtml(m.name||`Meal ${i+1}`)}</option>`).join('') + `<option value="__new__">+ New meal at end</option>`;
+}
+async function confirmCopyMeal(clientId, dayType, mealIdx){
+  const c = getClient(clientId);
+  const daySel = document.getElementById(`copyDaySel_${dayType}_${mealIdx}`);
+  const slotSel = document.getElementById(`copySlotSel_${dayType}_${mealIdx}`);
+  if(!daySel || !slotSel) return;
+  const targetDayType = daySel.value;
+  const targetSlotVal = slotSel.value;
+  const sourceMeals = prescribedMealsFor(c, dayType);
+  const source = sourceMeals[mealIdx];
   if(!source) return;
   const copiedItems = (source.items||[]).map(it=>({...it}));
   const copiedInstructions = source.instructions||'';
-  if(mealIdx < meals.length-1){
-    const dest = meals[mealIdx+1];
+  const isSameDay = targetDayType === dayType;
+  const targetMeals = prescribedMealsFor(c, targetDayType).map(m=>({...m, items:(m.items||[]).map(it=>({...it}))}));
+  if(targetSlotVal === '__new__'){
+    targetMeals.push({ name: `${source.name} (Copy)`, time: source.time||'', items: copiedItems, instructions: copiedInstructions });
+  } else {
+    const targetIdx = parseInt(targetSlotVal, 10);
+    if(isSameDay && targetIdx === mealIdx){ showToast('Choose a different meal to copy into', true); return; }
+    const dest = targetMeals[targetIdx];
+    if(!dest) return;
     if((dest.items&&dest.items.length) || dest.instructions){
       if(!confirm(`Overwrite "${dest.name}" with a copy of "${source.name}"? This replaces its current foods and instructions.`)) return;
     }
     dest.items = copiedItems;
     dest.instructions = copiedInstructions;
-  } else {
-    meals.push({ name: `${source.name} (Copy)`, time: source.time||'', items: copiedItems, instructions: copiedInstructions });
   }
-  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
-  if(error){ showToast('Could not copy meal: '+error.message, true); return; }
-  showToast('Meal copied');
-  switchMealTab(dayType);
-}
-async function copyMealToDayType(clientId, dayType, mealIdx, targetDayType){
-  if(!targetDayType) return;
-  const c = getClient(clientId);
-  const sourceMeals = prescribedMealsFor(c, dayType);
-  const source = sourceMeals[mealIdx];
-  if(!source) return;
-  const targetMeals = prescribedMealsFor(c, targetDayType).map(m=>({...m, items:(m.items||[]).map(it=>({...it}))}));
-  targetMeals.push({ name: source.name, time: source.time||'', items:(source.items||[]).map(it=>({...it})), instructions: source.instructions||'' });
   const { error } = await saveMealsForTarget(clientId, targetDayType, targetMeals, 'plan');
   if(error){ showToast('Could not copy meal: '+error.message, true); return; }
   const label = (dayTypesFor(c).find(([k])=>k===targetDayType)||[,targetDayType])[1];
   showToast(`Copied to ${label}`);
+  switchMealTab(dayType);
+}
+function startMealBlockDrag(e, clientId, dayType){
+  const row = e.target.closest('.meal-block');
+  if(!row) return;
+  const container = row.parentElement;
+  if(!container) return;
+  startRowDrag(e, container, '.meal-block', (from,to)=>reorderMealBlocks(clientId, dayType, from, to));
+}
+async function reorderMealBlocks(clientId, dayType, fromIdx, toIdx){
+  const c = getClient(clientId);
+  const meals = prescribedMealsFor(c, dayType);
+  const [moved] = meals.splice(fromIdx,1);
+  meals.splice(toIdx,0,moved);
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
+  if(error){ showToast('Could not save new order: '+error.message, true); return; }
   switchMealTab(dayType);
 }
 async function resetClientMealLog(clientId, dayType){
