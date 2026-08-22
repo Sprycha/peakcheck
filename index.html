@@ -1,0 +1,3081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PeakCheck &mdash; Client Check-In Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PeakCheck">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="favicon.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161923; --panel2:#1d212e; --border:#2a2f3d;
+    --text:#eef0f5; --sub:#9aa1b4; --accent:#ff5c35; --accent2:#ffb238;
+    --green:#3ddc84; --red:#ff5c5c; --blue:#4da3ff; --radius:12px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  #app{display:flex;min-height:100vh;}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:#333849;border-radius:4px;}
+
+  #sidebar{width:230px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px;overflow-y:auto;}
+  .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 20px 8px;}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;flex-shrink:0;}
+  .brand-name{font-weight:700;font-size:17px;letter-spacing:.2px;}
+  .brand-sub{font-size:11px;color:var(--sub);}
+  .navlink{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;color:var(--sub);cursor:pointer;font-size:13.5px;font-weight:600;border:1px solid transparent;}
+  .navlink:hover{background:var(--panel2);color:var(--text);}
+  .navlink.active{background:rgba(255,92,53,0.12);color:var(--accent);border-color:rgba(255,92,53,0.35);}
+  .nav-icon{width:18px;text-align:center;flex-shrink:0;}
+  .nav-section-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:#565d70;margin:14px 8px 4px;font-weight:700;}
+  .sidebar-footer{margin-top:auto;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
+  .sidebar-footer .btn-ghost{width:100%;text-align:center;}
+
+  #main{flex:1;display:flex;flex-direction:column;min-width:0;}
+  #topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);background:var(--panel);gap:16px;flex-wrap:wrap;}
+  .role-toggle{display:flex;background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:3px;gap:2px;}
+  .role-btn{padding:7px 14px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;color:var(--sub);}
+  .role-btn.active{background:var(--accent);color:#fff;}
+  .client-select{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;}
+  .topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0;}
+  .page-title{font-size:20px;font-weight:800;}
+  .page-sub{font-size:12.5px;color:var(--sub);margin-top:2px;}
+
+  #content{padding:24px;overflow-y:auto;flex:1;}
+
+  .grid{display:grid;gap:16px;}
+  .cards-3{grid-template-columns:repeat(3,1fr);}
+  .cards-2{grid-template-columns:repeat(2,1fr);}
+  .cards-4{grid-template-columns:repeat(4,1fr);}
+  @media(max-width:1100px){.cards-3,.cards-4{grid-template-columns:repeat(2,1fr);} }
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;}
+  .card h3{margin:0 0 4px;font-size:14px;}
+  .stat-label{font-size:12px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+  .stat-value{font-size:26px;font-weight:800;margin-top:6px;}
+  .stat-delta{font-size:12.5px;font-weight:700;margin-top:4px;}
+  .delta-pos{color:var(--green);}
+  .delta-neg{color:var(--red);}
+  .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;}
+  .badge-green{background:rgba(61,220,132,0.15);color:var(--green);}
+  .badge-red{background:rgba(255,92,92,0.15);color:var(--red);}
+  .badge-amber{background:rgba(255,178,56,0.15);color:var(--accent2);}
+  .badge-blue{background:rgba(77,163,255,0.15);color:var(--blue);}
+
+  .client-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;cursor:pointer;transition:.15s;}
+  .client-card:hover{border-color:var(--accent);transform:translateY(-2px);}
+  .client-card-top{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+  .client-card-name{font-weight:700;font-size:15px;}
+  .client-card-goal{font-size:12px;color:var(--sub);}
+  .mini-row{display:flex;justify-content:space-between;font-size:12.5px;padding:6px 0;border-top:1px solid var(--border);}
+  .mini-row span:first-child{color:var(--sub);}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;color:var(--sub);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;padding:7px 8px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  td{padding:8px;border-bottom:1px solid var(--border);}
+  tr:last-child td{border-bottom:none;}
+  .table-wrap{overflow-x:auto;}
+  .spreadsheet td{padding:4px 5px;}
+
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:18px;flex-wrap:wrap;}
+  .tab{padding:10px 16px;font-size:13.5px;font-weight:700;color:var(--sub);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px;}
+  .tab.active{color:var(--accent);border-color:var(--accent);}
+  .tab-remove{color:var(--sub);font-size:11px;cursor:pointer;line-height:1;}
+  .tab-remove:hover{color:var(--red);}
+
+  label{display:block;font-size:11.5px;font-weight:700;color:var(--sub);margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em;}
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 9px;border-radius:8px;font-size:13px;font-family:inherit;
+  }
+  input:disabled,select:disabled,textarea:disabled{opacity:.65;cursor:not-allowed;}
+  textarea{resize:vertical;min-height:60px;}
+  .field{margin-bottom:14px;}
+  .btn{background:var(--accent);color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:700;font-size:13.5px;cursor:pointer;}
+  .btn:hover{background:#e6501f;}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text);}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent);}
+  .btn-sm{padding:6px 12px;font-size:12.5px;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row > *{flex:1;min-width:110px;}
+
+  .photo-box{aspect-ratio:3/4;background:var(--panel2);border:1.5px dashed var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--sub);font-size:12px;cursor:pointer;overflow:hidden;position:relative;text-align:center;padding:8px;background-size:cover;background-position:center;}
+  .photo-box:hover{border-color:var(--accent);color:var(--accent);}
+  .photo-label{position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.55);padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:700;color:#fff;}
+
+  .empty{color:var(--sub);font-size:13px;padding:30px;text-align:center;}
+  .pill-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+  .day-pill{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;min-width:130px;}
+  .day-pill b{display:block;font-size:12.5px;margin-bottom:3px;color:var(--accent2);}
+  .toast{position:fixed;bottom:24px;right:24px;background:var(--green);color:#04361a;padding:14px 20px;border-radius:10px;font-weight:700;font-size:13.5px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:999;display:none;max-width:340px;}
+  .toast.warn{background:var(--accent2);color:#3a2400;}
+  .flag-row{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--red);font-weight:600;margin-top:8px;}
+  .section-title{font-size:16px;font-weight:800;margin:0 0 14px;}
+  .muted{color:var(--sub);}
+  .chart-wrap{height:220px;}
+  .compound-tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:700;margin-left:6px;white-space:nowrap;}
+  .tag-anabolic{background:rgba(255,92,92,.15);color:var(--red);}
+  .tag-oral{background:rgba(255,178,56,.15);color:var(--accent2);}
+  .tag-ancillary{background:rgba(77,163,255,.15);color:var(--blue);}
+  .tag-peptide{background:rgba(61,220,132,.15);color:var(--green);}
+  .tag-other{background:rgba(154,161,180,.15);color:var(--sub);}
+
+  .dyn-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr)) 34px;gap:6px;margin-bottom:6px;align-items:center;}
+  .dyn-row.food-row{grid-template-columns:1.6fr .7fr .7fr .7fr .7fr .7fr 1fr 34px;}
+  .dyn-row.ped-row{grid-template-columns:1.3fr .9fr 1fr 1fr 1.1fr 1.2fr 34px;}
+  .dyn-row.supp-row{grid-template-columns:1fr 1.2fr .9fr 1fr 1.2fr 34px;}
+  .dyn-row-remove{background:transparent;border:1px solid var(--border);color:var(--red);border-radius:8px;cursor:pointer;height:34px;}
+  .meal-block{border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--panel2);}
+  .meal-block h4{margin:0 0 8px;font-size:13px;color:var(--accent2);}
+  .meal-total{font-size:12px;color:var(--sub);margin-top:6px;text-align:right;}
+  .food-read-row{padding:10px 0;border-bottom:1px solid var(--border);}
+  .food-read-row:last-child{border-bottom:none;}
+  .food-read-name{font-weight:700;font-size:14px;color:var(--text);}
+  .food-read-meta{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px;margin-top:3px;}
+  .food-read-grams{font-size:12px;color:var(--accent2);font-weight:700;}
+  .food-read-macros{font-size:12.5px;color:var(--sub);}
+  .food-read-notes{font-size:11.5px;margin-top:3px;}
+  .macro-summary{display:flex;flex-wrap:wrap;gap:10px 6px;padding:14px 16px;}
+  .macro-summary-row{flex:1;min-width:64px;text-align:center;}
+  .macro-summary-row span{display:block;font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-bottom:4px;}
+  .macro-summary-row b{font-size:17px;font-weight:800;}
+  .macro-summary-row b i{font-style:normal;font-weight:600;font-size:13px;color:var(--sub);}
+  @media(max-width:820px){ .macro-summary{padding:12px;gap:8px 4px;} .macro-summary-row b{font-size:14px;} .macro-summary-row b i{font-size:10.5px;} .macro-summary-row span{font-size:9px;} }
+  .meal-target-table{margin-bottom:10px;}
+  .meal-target-table td,.meal-target-table th{font-size:12px;}
+  .client-food-table input{font-size:13px;padding:6px 7px;}
+  .client-food-table td:first-child{min-width:130px;}
+  .exercise-read-row{padding:8px 0;border-bottom:1px solid var(--border);}
+  .exercise-read-row:last-child{border-bottom:none;}
+  .exercise-read-name{font-weight:700;font-size:13.5px;}
+  .exercise-read-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:2px;font-size:12px;}
+  .exercise-read-reps{color:var(--accent2);font-weight:700;}
+  .meal-instructions-read{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px;}
+  .meal-instructions-read .meal-instructions-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);font-weight:700;margin-bottom:4px;}
+  .meal-instructions-read p{margin:0;font-size:13px;line-height:1.5;white-space:pre-wrap;}
+  .food-edit-row{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--bg);}
+  .food-edit-top{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .food-edit-top .food-name{flex:1;}
+  .food-edit-top .dyn-row-remove{width:34px;flex-shrink:0;}
+  .food-edit-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;}
+
+  .meal-block-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;}
+  .meal-block-header h4{margin:0;}
+  .meal-name{font-weight:700;font-size:13.5px;padding:8px 10px;margin-bottom:4px;width:100%;}
+  .meal-header-macros{font-size:12px;color:var(--sub);}
+  .icon-btn{background:transparent;border:1px solid var(--border);color:var(--sub);border-radius:8px;cursor:pointer;width:30px;height:30px;font-size:14px;line-height:1;flex-shrink:0;}
+  .icon-btn:hover{color:var(--text);border-color:var(--accent2);}
+  .icon-btn-danger{color:var(--red);}
+  .icon-btn-danger:hover{color:var(--red);border-color:var(--red);}
+  .food-picker-panel{background:var(--panel);border-radius:14px;max-width:480px;width:100%;margin:20px auto;padding:18px;max-height:calc(100vh - 40px);overflow:auto;}
+  .food-picker-header{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+  .food-picker-panel > input[type=text]{width:100%;margin-bottom:12px;}
+  .food-picker-list{max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:12px;}
+  .food-picker-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);}
+  .food-picker-row:last-child{border-bottom:none;}
+  .food-picker-row.selected{background:var(--panel2);}
+  .food-picker-selected{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;}
+  .tab-add{color:var(--accent2);}
+  .checkin-feedback-thread{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;max-height:340px;overflow-y:auto;}
+  .checkin-msg{display:flex;flex-direction:column;max-width:78%;}
+  .checkin-msg-coach{align-self:flex-start;align-items:flex-start;}
+  .checkin-msg-client{align-self:flex-end;align-items:flex-end;}
+  .checkin-msg-bubble{border-radius:10px;padding:9px 12px;font-size:13px;line-height:1.4;white-space:pre-wrap;}
+  .checkin-msg-coach .checkin-msg-bubble{background:var(--panel2);border:1px solid var(--border);}
+  .checkin-msg-client .checkin-msg-bubble{background:var(--accent);color:#fff;}
+  .checkin-msg-meta{font-size:10px;color:var(--sub);margin-top:3px;}
+  .checkin-feedback-input{display:flex;gap:8px;}
+  .checkin-feedback-input input{flex:1;}
+  .day-pick{display:inline-flex;align-items:center;justify-content:center;padding:7px 12px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--sub);user-select:none;}
+  .day-pick.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .notif-section-label{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;}
+  .notif-list{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px;}
+  .notif-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
+  .notif-row:last-child{border-bottom:none;}
+  .notif-row:hover{background:var(--panel2);}
+  .notif-row-text{flex:1;min-width:0;}
+  .notif-row-name{font-weight:700;font-size:13.5px;}
+  .notif-row-sub{font-size:11.5px;color:var(--sub);margin-top:1px;}
+  .notif-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+  .notif-chevron{color:var(--sub);font-size:18px;flex-shrink:0;}
+  .mini-field{display:flex;flex-direction:column;gap:2px;}
+  .mini-field label{font-size:9.5px;margin-bottom:0;color:var(--sub);}
+  @media(max-width:640px){ .food-edit-grid{grid-template-columns:repeat(3,1fr);} }
+  .filecard{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;background:var(--panel2);gap:12px;flex-wrap:wrap;}
+  .filecard-left b{font-size:13.5px;}
+  .filecard-left div{font-size:12px;color:var(--sub);margin-top:2px;}
+  .collapsible summary{cursor:pointer;font-weight:700;font-size:13px;color:var(--accent2);padding:4px 0;}
+  .disclaimer{font-size:12px;color:var(--accent2);background:rgba(255,178,56,.08);border:1px solid rgba(255,178,56,.25);padding:10px 12px;border-radius:8px;margin-top:12px;}
+  .info-note{font-size:12.5px;color:var(--sub);background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--blue);padding:10px 12px;border-radius:8px;margin-bottom:14px;line-height:1.6;}
+  .drag-handle{cursor:grab;touch-action:none;color:var(--sub);padding:4px 6px;user-select:none;font-size:14px;line-height:1;flex-shrink:0;}
+  .drag-handle:hover{color:var(--text);}
+  .dragging-row{opacity:0.5;}
+  body.dragging-active{cursor:grabbing;}
+  body.dragging-active *{cursor:grabbing !important;}
+  .meal-copy-popover{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:10px;}
+  input[type=range]{accent-color:var(--accent);flex:1;}
+  .slider-row{display:flex;align-items:center;gap:10px;}
+  .slider-val{font-weight:700;width:26px;text-align:center;flex-shrink:0;}
+  .slider-endlabel{font-size:11px;color:var(--sub);flex-shrink:0;min-width:70px;}
+  .slider-endlabel.right{text-align:right;}
+  .rating-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;}
+  .rating-btn-group{display:flex;flex-wrap:wrap;gap:8px;}
+  .rating-btn{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;}
+  .rating-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .rating-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .photo-upload-group{display:flex;flex-direction:column;align-items:flex-start;gap:8px;}
+  .photo-thumbs{display:flex;flex-wrap:wrap;gap:6px;}
+  .photo-thumb{position:relative;width:56px;height:56px;border-radius:8px;background-size:cover;background-position:center;border:1px solid var(--border);flex-shrink:0;}
+  .photo-thumb .rm{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;}
+  .photo-add-btn{width:56px;height:56px;border:1.5px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--sub);cursor:pointer;flex-shrink:0;}
+  .photo-add-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .photo-thumb-empty{width:56px;height:56px;border:1.5px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--sub);text-align:center;}
+  .photo-thumb-selected{border:2px solid var(--accent);}
+  .photo-compare-preview{width:100%;height:180px;border-radius:8px;background-size:cover;background-position:center;border:1px solid var(--border);}
+  .qform-card{margin-bottom:16px;}
+  .qform-card h4{margin:0 0 6px;font-size:13.5px;}
+  .qa-card{border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;background:var(--panel2);}
+  .qa-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+  .qa-row:last-child{border-bottom:none;}
+  .qa-row span:first-child{color:var(--sub);max-width:60%;}
+  .qa-row span:last-child{font-weight:600;text-align:right;}
+
+  .lightbox-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto;}
+  .lightbox-close{position:fixed;top:16px;right:16px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;cursor:pointer;z-index:201;flex-shrink:0;}
+  .lightbox-imgs{display:flex;gap:16px;overflow-x:auto;max-width:100%;padding:10px;align-items:flex-start;}
+  .lightbox-img-wrap{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:8px;}
+  .lightbox-img{max-height:80vh;max-width:85vw;border-radius:8px;object-fit:contain;display:block;}
+  .lightbox-label{color:#fff;font-size:12.5px;font-weight:700;background:rgba(255,255,255,0.12);padding:4px 10px;border-radius:6px;}
+  @media(max-width:820px){ .lightbox-imgs{flex-direction:column;align-items:center;} .lightbox-img{max-width:92vw;max-height:55vh;} }
+  .lightbox-carousel{display:flex;align-items:center;justify-content:center;gap:14px;max-width:100%;}
+  .lightbox-nav{background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:20px;width:44px;height:44px;border-radius:50%;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+  .lightbox-nav:hover:not(:disabled){background:rgba(255,255,255,0.25);}
+  .lightbox-nav:disabled{opacity:0.25;cursor:default;}
+  .lightbox-counter{color:#fff;font-size:12px;opacity:0.8;}
+  @media(max-width:820px){ .lightbox-carousel{gap:6px;} .lightbox-nav{width:36px;height:36px;font-size:16px;} }
+
+  #authScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .auth-box{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:28px;}
+  .auth-box .brand{justify-content:center;padding-bottom:22px;}
+  .auth-error{background:rgba(255,92,92,.1);border:1px solid rgba(255,92,92,.3);color:var(--red);padding:10px 12px;border-radius:8px;font-size:12.5px;margin-bottom:14px;}
+  .auth-info{background:rgba(77,163,255,.1);border:1px solid rgba(77,163,255,.3);color:var(--blue);padding:10px 12px;border-radius:8px;font-size:12.5px;margin-bottom:14px;}
+  .loading-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:14px;}
+
+  .menu-btn{display:none;background:transparent;border:1px solid var(--border);color:var(--text);width:36px;height:36px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;align-items:center;justify-content:center;}
+  .topbar-left{display:flex;align-items:center;gap:12px;min-width:0;}
+  #sidebarBackdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:45;}
+  #sidebarBackdrop.show{display:block;}
+
+  @media(max-width:820px){
+    .menu-btn{display:flex;}
+    #sidebar{position:fixed;top:0;left:0;height:100vh;z-index:50;transform:translateX(-100%);transition:transform .22s ease;box-shadow:0 0 30px rgba(0,0,0,0.5);}
+    #sidebar.open{transform:translateX(0);}
+    #content{padding:16px;}
+    #topbar{padding:12px 16px;}
+    .page-title{font-size:17px;}
+    .cards-2,.cards-3,.cards-4{grid-template-columns:1fr;}
+    .client-select{max-width:140px;}
+    input[type=text],input[type=number],input[type=date],input[type=password],select,textarea{font-size:16px;}
+    .pedsupp-add-row > *{min-width:100%;}
+    .table-wrap td,.table-wrap th{min-width:110px;}
+    .table-wrap td:first-child,.table-wrap th:first-child{min-width:64px;}
+    .table-wrap input,.table-wrap select{font-size:16px;}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ======================================================================
+   REFERENCE / STATIC DATA
+   ====================================================================== */
+const STORAGE_KEY = 'peakcheck_v1';
+
+const DAILY_FIELDS = [
+  {k:'weight', l:'Weight (kg)', t:'number', step:'0.1'},
+  {k:'water', l:'Water (L)', t:'number', step:'0.1'},
+  {k:'sleepHrs', l:'Sleep (hrs)', t:'number', step:'0.1'},
+  {k:'sleepQuality', l:'Sleep Qual 1-5', t:'number', min:1, max:5},
+  {k:'appetite', l:'Appetite 1-5', t:'number', min:1, max:5},
+  {k:'offPlan', l:'Off-Plan Meal', t:'select', opts:['No','Yes']},
+  {k:'steps', l:'Steps', t:'number'},
+  {k:'resistance', l:'Resistance Session', t:'select', opts:['No','Yes']},
+  {k:'desire', l:'Desire to Train 1-5', t:'number', min:1, max:5},
+  {k:'energyGym', l:'Energy in Gym 1-5', t:'number', min:1, max:5},
+  {k:'mood', l:'Mood 1-5', t:'number', min:1, max:5},
+  {k:'stress', l:'Stress 1-5', t:'number', min:1, max:5},
+  {k:'soreness', l:'Soreness 1-5', t:'number', min:1, max:5},
+  {k:'posing', l:'Posing', t:'select', opts:['No','Yes']},
+  {k:'extras', l:'EXTRAS (E.G. SAUNA, MASSAGE, COLD THERAPY, ETC...)', t:'text'}
+];
+const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+/* Starter reference lists — pulled from the coach's original check-in sheet.
+   These are NOT the live database (that lives in Supabase's reference_data
+   table and starts empty for a new account). They're only used as the
+   one-click "Import Starter List" option on each database page. */
+const STARTER_FOODS = [
+  {food:'Chicken Breast (Cooked)', cals:145, protein:32, carbs:0, fats:1.9, unit:'g', base:100},
+  {food:'Chicken Breast (Raw)', cals:106, protein:24, carbs:0, fats:1.1, unit:'g', base:100},
+  {food:'Lean Beef Mince (Raw)', cals:125, protein:21.9, carbs:0, fats:4.2, unit:'g', base:100},
+  {food:'Salmon (Cooked)', cals:172, protein:25, carbs:0, fats:8.0, unit:'g', base:100},
+  {food:'Fillet Steak (Cooked)', cals:188, protein:29.1, carbs:0, fats:8.0, unit:'g', base:100},
+  {food:'Cod (Cooked)', cals:106, protein:24.6, carbs:0, fats:0.8, unit:'g', base:100},
+  {food:'Prawns (Cooked)', cals:70, protein:15.4, carbs:0, fats:0.9, unit:'g', base:100},
+  {food:'Tuna (Tinned, Drained)', cals:109, protein:25, carbs:0, fats:1.0, unit:'g', base:100},
+  {food:'Eggs Whole', cals:69, protein:6, carbs:0, fats:5, unit:'unit', base:1},
+  {food:'Egg Whites', cals:44, protein:11.1, carbs:0, fats:0, unit:'g', base:100},
+  {food:'Greek Yoghurt (0%)', cals:58, protein:10.6, carbs:3.9, fats:0, unit:'g', base:100},
+  {food:'Whey Protein (per g protein)', cals:400, protein:100, carbs:0, fats:0, unit:'g', base:100},
+  {food:'Turkey Breast (Cooked)', cals:155, protein:35, carbs:0, fats:1.7, unit:'g', base:100},
+  {food:'Tofu', cals:83, protein:8.1, carbs:2.0, fats:4.8, unit:'g', base:100},
+  {food:'Oats', cals:340, protein:10.5, carbs:60.5, fats:6.2, unit:'g', base:100},
+  {food:'White Rice (Raw)', cals:352, protein:6.5, carbs:79.0, fats:0.9, unit:'g', base:100},
+  {food:'Jasmine Rice (Cooked)', cals:126, protein:2.8, carbs:27.8, fats:0.3, unit:'g', base:100},
+  {food:'White Potato (Raw)', cals:77, protein:2.0, carbs:17.0, fats:0.1, unit:'g', base:100},
+  {food:'Sweet Potato (Raw)', cals:88, protein:1.6, carbs:20.1, fats:0.1, unit:'g', base:100},
+  {food:'Bread (Sourdough) 40g Slice', cals:126, protein:5.0, carbs:26.0, fats:0.2, unit:'unit', base:1},
+  {food:'Almond Butter', cals:601, protein:21.0, carbs:10.0, fats:53.0, unit:'g', base:100},
+  {food:'EVOO', cals:900, protein:0, carbs:0, fats:100, unit:'g', base:100},
+  {food:'Avocado', cals:152, protein:1.8, carbs:1.8, fats:15.2, unit:'g', base:100},
+  {food:'Almonds', cals:579, protein:21.0, carbs:22.0, fats:50.0, unit:'g', base:100},
+  {food:'Banana', cals:85, protein:1.2, carbs:20.0, fats:0, unit:'g', base:100},
+  {food:'Blueberries', cals:51, protein:0.7, carbs:12.0, fats:0, unit:'g', base:100},
+  {food:'Broccoli', cals:34, protein:2.8, carbs:7.0, fats:0.4, unit:'g', base:100},
+  {food:'Spinach', cals:17, protein:2.9, carbs:1.4, fats:0, unit:'g', base:100},
+  {food:'Rice Cakes', cals:45, protein:0.7, carbs:10.0, fats:0.2, unit:'unit', base:1},
+  {food:'Mixed Veg', cals:26, protein:3.0, carbs:3.0, fats:0.2, unit:'g', base:100}
+];
+
+const STARTER_PEDS = [
+  {name:'Testosterone Enanthate (Test E)', cat:'Anabolic'},{name:'Testosterone Cypionate (Test C)', cat:'Anabolic'},
+  {name:'Testosterone Propionate (Test P)', cat:'Anabolic'},{name:'Testosterone Suspension', cat:'Anabolic'},
+  {name:'Testosterone Undecanoate', cat:'Anabolic'},{name:'Nandrolone Decanoate (Deca)', cat:'Anabolic'},
+  {name:'Nandrolone Phenylpropionate (NPP)', cat:'Anabolic'},{name:'Trenbolone Enanthate (Tren E)', cat:'Anabolic'},
+  {name:'Trenbolone Acetate (Tren A)', cat:'Anabolic'},{name:'Masteron Enanthate (Mast E)', cat:'Anabolic'},
+  {name:'Masteron Propionate (Mast P)', cat:'Anabolic'},{name:'Boldenone Undecylenate (EQ)', cat:'Anabolic'},
+  {name:'Primobolan Enanthate (Primo E)', cat:'Anabolic'},{name:'Primobolan Acetate (Primo A)', cat:'Anabolic'},
+  {name:'Winstrol (Stanozolol)', cat:'Oral'},{name:'Anavar (Oxandrolone)', cat:'Oral'},{name:'Turinabol (Tbol)', cat:'Oral'},
+  {name:'Dianabol (Dbol)', cat:'Oral'},{name:'Anadrol (Oxymetholone)', cat:'Oral'},{name:'Superdrol', cat:'Oral'},
+  {name:'Halotestin', cat:'Oral'},{name:'Proviron (Mesterolone)', cat:'Oral'},
+  {name:'Anastrozole (Arimidex)', cat:'Ancillary'},{name:'Exemestane (Aromasin)', cat:'Ancillary'},
+  {name:'Letrozole', cat:'Ancillary'},{name:'Tamoxifen (Nolvadex)', cat:'Ancillary'},{name:'Clomiphene (Clomid)', cat:'Ancillary'},
+  {name:'HCG', cat:'Ancillary'},{name:'Cabergoline (Caber)', cat:'Ancillary'},{name:'Finasteride', cat:'Ancillary'},
+  {name:'Dutasteride', cat:'Ancillary'},
+  {name:'HGH', cat:'Peptide'},{name:'IGF-1 LR3', cat:'Peptide'},{name:'BPC-157', cat:'Peptide'},{name:'TB-500', cat:'Peptide'},
+  {name:'Ipamorelin', cat:'Peptide'},{name:'CJC-1295', cat:'Peptide'},
+  {name:'Mk-677 (Ibutamoren)', cat:'Other'},{name:'RAD-140 (Testolone)', cat:'Other'},{name:'LGD-4033 (Ligandrol)', cat:'Other'},
+  {name:'Ostarine (MK-2866)', cat:'Other'},{name:'Cardarine (GW-501516)', cat:'Other'},{name:'Clenbuterol', cat:'Other'}
+];
+const STARTER_SUPPLEMENTS = [
+  {name:'NAC (N-Acetyl Cysteine)', cat:'Liver Support'},{name:'TUDCA', cat:'Liver Support'},
+  {name:'Vitamin D3 + K2', cat:'Vitamin'},{name:'Magnesium Glycinate', cat:'Mineral'},{name:'Omega-3 Fish Oil', cat:'General'},
+  {name:'CoQ10', cat:'Cardiovascular'},{name:'Citrus Bergamot', cat:'Cardiovascular'},{name:'Ubiquinol', cat:'Cardiovascular'},
+  {name:'Multivitamin', cat:'Vitamin'},{name:'B Complex', cat:'Vitamin'},{name:'Selenium', cat:'Mineral'},
+  {name:'Astragalus', cat:'General'},{name:'Circumin', cat:'General'},{name:'Fiber Supplement', cat:'General'},
+  {name:'Glycine', cat:'General'},{name:'Nattokinnase', cat:'General'},{name:'Beta-Sitosterol Plant Sterols', cat:'General'},
+  {name:'L-Carnitine', cat:'General'},{name:'5-amino-1MQ', cat:'General'},{name:'Aloe Vera + Glutamine Fasted Mix', cat:'General'}
+];
+let NUTRITION_DB = [];
+let PED_REFERENCE = [];
+let SUPPLEMENT_REFERENCE = [];
+const FREQUENCY_OPTIONS = ['Daily','Every Other Day (EOD)','Training Days','Per Week','2x Per Week','3x Per Week','4x Per Week','5x Per Week','6x Per Week','Weekly','Bi-Weekly','Once Monthly','As Needed'];
+const TIMING_OPTIONS = ['Upon Wake','Pre Gym','Post Gym','With Meal 1','With Meal 2','With Meal 3','Pre Bed','Morning','Evening','Split AM / PM','With Food','As Directed'];
+const MEAL_NAMES = ['Meal 1','Meal 2','Meal 3','Meal 4 (Pre-Workout)','Meal 5 (Post-Workout)','Meal 6'];
+const TEST_TYPES = ['Bloodwork','DEXA Scan','Body Comp Scan','ECG / Cardio','Other'];
+
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+/* ======================================================================
+   DRAG TO REORDER — generic pointer-based row reordering (mouse + touch).
+   A small grip handle on a row starts the drag; as the pointer moves the
+   row is swapped past its neighbours' midpoints; on release, onReorder
+   (fromIndex, toIndex) is called so the caller can persist the new order.
+   ====================================================================== */
+function startRowDrag(e, containerEl, rowSelector, onReorder){
+  e.preventDefault();
+  const row = e.target.closest(rowSelector);
+  if(!row || !containerEl) return;
+  const startRows = Array.from(containerEl.querySelectorAll(rowSelector));
+  const startIndex = startRows.indexOf(row);
+  if(startIndex===-1) return;
+  row.classList.add('dragging-row');
+  document.body.classList.add('dragging-active');
+  function onMove(ev){
+    const y = ev.clientY;
+    const rows = Array.from(containerEl.querySelectorAll(rowSelector)).filter(r=>r!==row);
+    let after = null;
+    for(const r of rows){
+      const rect = r.getBoundingClientRect();
+      const mid = rect.top + rect.height/2;
+      if(y < mid){ after = r; break; }
+    }
+    if(after) containerEl.insertBefore(row, after);
+    else containerEl.appendChild(row);
+  }
+  function onUp(){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    row.classList.remove('dragging-row');
+    document.body.classList.remove('dragging-active');
+    const endRows = Array.from(containerEl.querySelectorAll(rowSelector));
+    const endIndex = endRows.indexOf(row);
+    if(endIndex!==-1 && endIndex!==startIndex) onReorder(startIndex, endIndex);
+  }
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+/* ======================================================================
+   SEED / DEMO DATA
+   ====================================================================== */
+function genDay(idx, baseWeight, trend){
+  const w = +(baseWeight - trend*idx + (idx%2===0?0.15:-0.1)).toFixed(1);
+  return {
+    weight:w, weighTime:'7:00 AM', water:(3+(idx%3)*0.5).toFixed(1), sleepHrs:(6.5+(idx%3===0?0.8:0)).toFixed(1),
+    sleepQuality: 3+(idx%3), adherence: idx===5?3:5, appetite: 3+(idx%3), offPlan: idx===5?'Yes':'No',
+    digestion: idx===2?'Slight bloating':'Normal', steps: 8200+idx*350, cardioMin: 20+idx*3,
+    cardioType: idx%2===0?'Incline Walk':'Stairmaster', resistance: idx===6?'No':'Yes', desire: 4, energyGym: idx===4?3:4,
+    mood: idx===5?3:4, stress: idx===3?3:2, soreness: 3, posing: idx>=4?'Yes':'No', mobility: idx%2===0?'Yes':'No',
+    extras: idx===6?'Sauna 15min':''
+  };
+}
+function genWeek(week, baseWeight, trend){ return DAY_LABELS.map((d,i)=>genDay(i, baseWeight, trend)); }
+
+function getSeedClients(){
+  return [
+    {
+      id:'c1', name:'Jake Morrison', initials:'JM', color:'#ff5c35',
+      goal:'Nationals Prep — Nov 14', height:`6'1"`, checkinDay:'Monday',
+      coachNotes:'Cutting is going well. Watch sleep — trending down last 2 weeks.',
+      targets:{ steps:10000, water:6, sleep:8, cardio:40 },
+      mealPlan:{
+        training:[
+          {name:'Meal 1', time:'7:00 AM', items:[{food:'Egg Whites', grams:240, cals:106, protein:27, carbs:0, fats:0, notes:''},{food:'Eggs Whole', grams:2, cals:138, protein:12, carbs:0, fats:10, notes:'2 units'},{food:'Oats', grams:80, cals:272, protein:8, carbs:48, fats:5, notes:''},{food:'Banana', grams:120, cals:102, protein:1.4, carbs:24, fats:0, notes:''}]},
+          {name:'Meal 2', time:'10:30 AM', items:[{food:'Chicken Breast (Cooked)', grams:200, cals:290, protein:64, carbs:0, fats:3.8, notes:''},{food:'White Rice (Raw)', grams:100, cals:352, protein:6.5, carbs:79, fats:0.9, notes:'dry weight'},{food:'Mixed Veg', grams:150, cals:39, protein:4.5, carbs:4.5, fats:0.3, notes:''}]},
+          {name:'Meal 3 (Pre-Workout)', time:'1:30 PM', items:[{food:'Cod (Cooked)', grams:200, cals:212, protein:49, carbs:0, fats:1.6, notes:''},{food:'White Potato (Raw)', grams:250, cals:193, protein:5, carbs:42.5, fats:0.3, notes:''},{food:'EVOO', grams:10, cals:90, protein:0, carbs:0, fats:10, notes:''}]},
+          {name:'Meal 4 (Post-Workout)', time:'4:30 PM', items:[{food:'Whey Protein (per g protein)', grams:40, cals:160, protein:40, carbs:0, fats:0, notes:''},{food:'Rice Cakes', grams:3, cals:135, protein:2.1, carbs:30, fats:0.6, notes:'3 units'},{food:'Banana', grams:120, cals:102, protein:1.4, carbs:24, fats:0, notes:''}]},
+          {name:'Meal 5', time:'7:30 PM', items:[{food:'Lean Beef Mince (Raw)', grams:220, cals:275, protein:48, carbs:0, fats:9.2, notes:''},{food:'Jasmine Rice (Cooked)', grams:250, cals:315, protein:7, carbs:69.5, fats:0.8, notes:''},{food:'Spinach', grams:100, cals:17, protein:2.9, carbs:1.4, fats:0, notes:''}]},
+          {name:'Meal 6', time:'9:30 PM', items:[{food:'Greek Yoghurt (0%)', grams:200, cals:116, protein:21.2, carbs:7.8, fats:0, notes:''},{food:'Almonds', grams:30, cals:174, protein:6.3, carbs:6.6, fats:15, notes:''}]}
+        ],
+        rest:[
+          {name:'Meal 1', time:'8:00 AM', items:[{food:'Egg Whites', grams:240, cals:106, protein:27, carbs:0, fats:0, notes:''},{food:'Oats', grams:70, cals:238, protein:7.4, carbs:42, fats:4.3, notes:''}]},
+          {name:'Meal 2', time:'11:30 AM', items:[{food:'Chicken Breast (Cooked)', grams:180, cals:261, protein:58, carbs:0, fats:3.4, notes:''},{food:'Sweet Potato (Raw)', grams:200, cals:176, protein:3.2, carbs:40.2, fats:0.2, notes:''}]},
+          {name:'Meal 3', time:'2:30 PM', items:[{food:'Salmon (Cooked)', grams:150, cals:258, protein:37.5, carbs:0, fats:12, notes:''},{food:'Broccoli', grams:200, cals:68, protein:5.6, carbs:14, fats:0.8, notes:''}]},
+          {name:'Meal 4', time:'5:00 PM', items:[{food:'Turkey Breast (Cooked)', grams:180, cals:279, protein:63, carbs:0, fats:3.1, notes:''},{food:'White Rice (Raw)', grams:70, cals:246, protein:4.6, carbs:55.3, fats:0.6, notes:'dry weight'}]},
+          {name:'Meal 5', time:'8:00 PM', items:[{food:'Tofu', grams:200, cals:166, protein:16.2, carbs:4, fats:9.6, notes:''},{food:'Avocado', grams:80, cals:122, protein:1.4, carbs:1.4, fats:12.2, notes:''}]},
+          {name:'Meal 6', time:'9:30 PM', items:[{food:'Greek Yoghurt (0%)', grams:200, cals:116, protein:21.2, carbs:7.8, fats:0, notes:''}]}
+        ]
+      },
+      trainingSplit:[
+        {label:'Day 1 — Chest & Triceps', exercises:['Incline Barbell Press 4x8-10','Flat DB Press 3x10-12','Cable Fly 3x12-15','Overhead Tricep Ext. 3x10-12','Rope Pushdown 3x12-15']},
+        {label:'Day 2 — Back & Biceps', exercises:['Weighted Pull-ups 4x6-8','Barbell Row 4x8-10','Seated Cable Row 3x10-12','EZ Bar Curl 3x10-12','Incline DB Curl 3x12-15']},
+        {label:'Day 3 — Legs', exercises:['Back Squat 5x6-8','Leg Press 4x10-12','Romanian Deadlift 3x8-10','Leg Curl 3x12-15','Standing Calf Raise 4x15-20']},
+        {label:'Day 4 — Shoulders & Abs', exercises:['Seated DB Press 4x8-10','Lateral Raise 4x12-15','Rear Delt Fly 3x12-15','Hanging Leg Raise 3x15']},
+        {label:'Day 5 — Posing / Conditioning', exercises:['Posing Practice 20min','Stairmaster 30min']}
+      ],
+      schedule:[
+        {day:'Mon', work:'9am finish', trainingTime:'6:00 PM', whatTraining:'Chest & Triceps', cardioTime:'AM fasted', cardioNote:'30min incline walk'},
+        {day:'Tue', work:'Office 9-5', trainingTime:'6:00 PM', whatTraining:'Back & Biceps', cardioTime:'AM fasted', cardioNote:'30min incline walk'},
+        {day:'Wed', work:'Office 9-5', trainingTime:'Rest', whatTraining:'Rest', cardioTime:'PM', cardioNote:'40min LISS'},
+        {day:'Thu', work:'Office 9-5', trainingTime:'6:00 PM', whatTraining:'Legs', cardioTime:'AM fasted', cardioNote:'30min incline walk'},
+        {day:'Fri', work:'9am finish', trainingTime:'6:00 PM', whatTraining:'Shoulders & Abs', cardioTime:'AM fasted', cardioNote:'30min incline walk'},
+        {day:'Sat', work:'Off', trainingTime:'10:00 AM', whatTraining:'Posing + Stairmaster', cardioTime:'AM', cardioNote:'30min stairmaster'},
+        {day:'Sun', work:'Off', trainingTime:'Rest', whatTraining:'Rest', cardioTime:'—', cardioNote:'Meal prep'}
+      ],
+      programTimeline:[
+        {month:'Jul', week:1, date:'2026-07-20', phase:'Cut — Phase 1', avgBW:97.4, trainingKcal:2500, restKcal:2300, prescribedSteps:9000, prescribedCardio:'2x20min', actualSteps:8900, actualCardio:'2x20min', sessions:'5/5', notes:'Good start, adherence high'},
+        {month:'Jul', week:2, date:'2026-07-27', phase:'Cut — Phase 1', avgBW:96.6, trainingKcal:2450, restKcal:2250, prescribedSteps:9500, prescribedCardio:'2x25min', actualSteps:9200, actualCardio:'2x25min', sessions:'5/5', notes:'On track'},
+        {month:'Aug', week:3, date:'2026-08-03', phase:'Cut — Phase 2', avgBW:95.6, trainingKcal:2400, restKcal:2200, prescribedSteps:10000, prescribedCardio:'2x30min', actualSteps:9700, actualCardio:'2x30min', sessions:'5/5', notes:'Digestion a bit off'},
+        {month:'Aug', week:4, date:'2026-08-10', phase:'Cut — Phase 2', avgBW:94.3, trainingKcal:2350, restKcal:2150, prescribedSteps:10000, prescribedCardio:'2x30min', actualSteps:9900, actualCardio:'2x30min', sessions:'4/5', notes:'Flag: low energy + sleep'}
+      ],
+      testResults:[
+        {id:uid(), date:'2026-06-15', type:'Bloodwork', label:'Pre-Prep Baseline Panel', notes:'Lipids, liver enzymes, hormone panel — all within range, AST slightly elevated.', fileName:'baseline_bloodwork.pdf', fileDataUrl:null}
+      ],
+      checkins:[
+        { id:uid(), week:1, date:'2026-07-20', days:genWeek(1,98.4,0.15),
+          photos:{front:null,side:null,back:null}, pedEntries:[{drug:'Testosterone Enanthate (Test E)',dose:'250mg',frequency:'2x Per Week',timing:'Morning',phase:'Base — Prep',notes:'Mon/Thu, E3.5D protocol'},{drug:'Anastrozole (Arimidex)',dose:'0.5mg',frequency:'Every Other Day (EOD)',timing:'With Food',phase:'Ancillary',notes:'Watch joint dryness'}],
+          supplements:[{timing:'Fasted', drug:'Aloe Vera + Glutamine + Greens mix', dose:'16oz', frequency:'Daily', notes:''}],
+          sleepHours:'7.5', sleepRating:4, nutritionFollowed:'Yes', nutritionDetails:'',
+          hunger:3, digestionFeedback:'No issues.', bowelFrequency:'1x per day', waterIntake:'5-6L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:4, trainingConcerns:'Feeling strong out the gate.', recoveryRating:4,
+          cardioCompleted:'Yes', avgHeartRate:'125bpm', stressRating:2, stressors:'None this week.', overallAdherence:5,
+          clientNotes:'Felt strong this week, hips a bit sore from squats.', coachFeedback:'Great start — add 100g carbs on training days.' },
+        { id:uid(), week:2, date:'2026-07-27', days:genWeek(2,97.1,0.13),
+          photos:{front:null,side:null,back:null}, pedEntries:[{drug:'Testosterone Enanthate (Test E)',dose:'250mg',frequency:'2x Per Week',timing:'Morning',phase:'Base — Prep',notes:'Mon/Thu'},{drug:'Anastrozole (Arimidex)',dose:'0.5mg',frequency:'Every Other Day (EOD)',timing:'With Food',phase:'Ancillary',notes:''}],
+          supplements:[{timing:'Fasted', drug:'Aloe Vera + Glutamine + Greens mix', dose:'16oz', frequency:'Daily', notes:''}],
+          sleepHours:'6.5', sleepRating:3, nutritionFollowed:'Yes', nutritionDetails:'',
+          hunger:4, digestionFeedback:'Fine, no concerns.', bowelFrequency:'1x per day', waterIntake:'5L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:4, trainingConcerns:'', recoveryRating:3,
+          cardioCompleted:'Yes', avgHeartRate:'126bpm', stressRating:3, stressors:'Work stress building up.', overallAdherence:4,
+          clientNotes:'Sleep has been rough, work stress. Hunger creeping up.', coachFeedback:'Adherence still solid — add a fibrous veg serving to Meal 3 for satiety.' },
+        { id:uid(), week:3, date:'2026-08-03', days:genWeek(3,96.0,0.13),
+          photos:{front:null,side:null,back:null}, pedEntries:[{drug:'Testosterone Enanthate (Test E)',dose:'250mg',frequency:'2x Per Week',timing:'Morning',phase:'Base — Prep',notes:'Mon/Thu'},{drug:'Anastrozole (Arimidex)',dose:'0.5mg',frequency:'Every Other Day (EOD)',timing:'With Food',phase:'Ancillary',notes:''},{drug:'Cardarine (GW-501516)',dose:'20mg',frequency:'Daily',timing:'Upon Wake',phase:'Fat Loss — added Wk3',notes:'Added for final push'}],
+          supplements:[{timing:'Fasted', drug:'Aloe Vera + Glutamine + Greens mix', dose:'16oz', frequency:'Daily', notes:''},{timing:'Pre Bed', drug:'Magnesium Glycinate', dose:'400mg', frequency:'Daily', notes:'For sleep'}],
+          sleepHours:'6', sleepRating:3, nutritionFollowed:'No', nutritionDetails:'Had a slice of cake at a work event.',
+          hunger:4, digestionFeedback:'Some bloating mid-week, settled by Friday.', bowelFrequency:'Less than 1x per day', waterIntake:'4-5L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:4, trainingConcerns:'', recoveryRating:3,
+          cardioCompleted:'Yes', avgHeartRate:'127bpm', stressRating:3, stressors:'Work deadline.', overallAdherence:4,
+          clientNotes:'Digestion a bit off, bloated most of the week.', coachFeedback:'Pull back fiber slightly and reassess. Good scale progress though.' },
+        { id:uid(), week:4, date:'2026-08-10', days:genWeek(4,94.8,0.15),
+          photos:{front:null,side:null,back:null}, pedEntries:[{drug:'Testosterone Enanthate (Test E)',dose:'250mg',frequency:'2x Per Week',timing:'Morning',phase:'Base — Prep',notes:'Mon/Thu'},{drug:'Anastrozole (Arimidex)',dose:'0.5mg',frequency:'Every Other Day (EOD)',timing:'With Food',phase:'Ancillary',notes:''},{drug:'Cardarine (GW-501516)',dose:'20mg',frequency:'Daily',timing:'Upon Wake',phase:'Fat Loss',notes:''}],
+          supplements:[{timing:'Fasted', drug:'Aloe Vera + Glutamine + Greens mix', dose:'16oz', frequency:'Daily', notes:''},{timing:'Pre Bed', drug:'Magnesium Glycinate', dose:'400mg', frequency:'Daily', notes:''}],
+          sleepHours:'6', sleepRating:3, nutritionFollowed:'No', nutritionDetails:'Had an extra handful of nuts twice, otherwise on plan.',
+          hunger:4, digestionFeedback:'Some bloating mid-week, settled by Friday.', bowelFrequency:'1x per day', waterIntake:'4-5L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:4, trainingConcerns:'Feeling a bit flat in the gym this week, strength holding though.', recoveryRating:3,
+          cardioCompleted:'Yes', avgHeartRate:'128bpm', stressRating:4, stressors:'Work deadline this week.', overallAdherence:4,
+          clientNotes:'Struggling with hunger and low energy in the gym this week. Could use some new cardio variety, getting bored of the stairmaster.', coachFeedback:'Flagging this one — energy/sleep both down. Let\'s hop on a call.' }
+      ]
+    },
+    {
+      id:'c2', name:'Sarah Blake', initials:'SB', color:'#4da3ff',
+      goal:'Bikini Prep — Sept 20', height:`5'5"`, checkinDay:'Sunday',
+      coachNotes:'On track, very consistent. Consider adding posing sessions next block.',
+      targets:{ steps:9000, water:4, sleep:8, cardio:30 },
+      mealPlan:{
+        training:[
+          {name:'Meal 1', time:'6:30 AM', items:[{food:'Eggs Whole', grams:1, cals:69, protein:6, carbs:0, fats:5, notes:'1 unit'},{food:'Egg Whites', grams:150, cals:66, protein:16.7, carbs:0, fats:0, notes:''},{food:'Oats', grams:55, cals:187, protein:5.8, carbs:33.3, fats:3.4, notes:''}]},
+          {name:'Meal 2', time:'11:00 AM', items:[{food:'Chicken Breast (Cooked)', grams:150, cals:218, protein:48, carbs:0, fats:2.9, notes:''},{food:'White Rice (Raw)', grams:65, cals:229, protein:4.2, carbs:51.4, fats:0.6, notes:'dry weight'}]},
+          {name:'Meal 3', time:'2:30 PM', items:[{food:'Cod (Cooked)', grams:150, cals:159, protein:36.9, carbs:0, fats:1.2, notes:''},{food:'Sweet Potato (Raw)', grams:130, cals:114, protein:2.1, carbs:26.1, fats:0.1, notes:''},{food:'Broccoli', grams:150, cals:51, protein:4.2, carbs:10.5, fats:0.6, notes:''}]},
+          {name:'Meal 4 (Post-Workout)', time:'5:30 PM', items:[{food:'Whey Protein (per g protein)', grams:30, cals:120, protein:30, carbs:0, fats:0, notes:''},{food:'Rice Cakes', grams:1, cals:45, protein:0.7, carbs:10, fats:0.2, notes:'1 unit'}]},
+          {name:'Meal 5', time:'8:00 PM', items:[{food:'Turkey Breast (Cooked)', grams:150, cals:233, protein:52.5, carbs:0, fats:2.6, notes:''},{food:'Mixed Veg', grams:180, cals:47, protein:5.4, carbs:5.4, fats:0.4, notes:''}]}
+        ],
+        rest:[
+          {name:'Meal 1', time:'7:00 AM', items:[{food:'Egg Whites', grams:150, cals:66, protein:16.7, carbs:0, fats:0, notes:''},{food:'Oats', grams:45, cals:153, protein:4.7, carbs:27.2, fats:2.8, notes:''}]},
+          {name:'Meal 2', time:'12:00 PM', items:[{food:'Chicken Breast (Cooked)', grams:130, cals:189, protein:41.6, carbs:0, fats:2.5, notes:''},{food:'Spinach', grams:100, cals:17, protein:2.9, carbs:1.4, fats:0, notes:''}]},
+          {name:'Meal 3', time:'3:30 PM', items:[{food:'Salmon (Cooked)', grams:120, cals:206, protein:30, carbs:0, fats:9.6, notes:''},{food:'Broccoli', grams:150, cals:51, protein:4.2, carbs:10.5, fats:0.6, notes:''}]},
+          {name:'Meal 4', time:'6:30 PM', items:[{food:'Tofu', grams:150, cals:124.5, protein:12.2, carbs:3, fats:7.2, notes:''},{food:'Mixed Veg', grams:150, cals:39, protein:4.5, carbs:4.5, fats:0.3, notes:''}]},
+          {name:'Meal 5', time:'8:30 PM', items:[{food:'Greek Yoghurt (0%)', grams:150, cals:87, protein:15.9, carbs:5.9, fats:0, notes:''}]}
+        ]
+      },
+      trainingSplit:[
+        {label:'Day 1 — Glutes & Hamstrings', exercises:['Hip Thrust 4x10-12','RDL 4x10-12','Cable Kickback 3x15','Seated Leg Curl 3x12-15']},
+        {label:'Day 2 — Upper Body', exercises:['Lat Pulldown 3x10-12','DB Shoulder Press 3x10-12','Cable Row 3x12','Lateral Raise 3x15']},
+        {label:'Day 3 — Glutes & Quads', exercises:['Back Squat 4x8-10','Walking Lunge 3x12/leg','Leg Extension 3x15','Hip Abduction 3x15-20']},
+        {label:'Day 4 — Glutes Focus', exercises:['Hip Thrust 4x12-15','Cable Pull-through 3x15','Bulgarian Split Squat 3x10/leg']},
+        {label:'Day 5 — Posing + Cardio', exercises:['Posing Practice 25min','Stairmaster 25min']}
+      ],
+      schedule:[
+        {day:'Mon', work:'Rest', trainingTime:'Rest', whatTraining:'Rest', cardioTime:'—', cardioNote:'—'},
+        {day:'Tue', work:'PT clients 10-1', trainingTime:'2:00 PM', whatTraining:'Glutes & Hamstrings', cardioTime:'AM fasted', cardioNote:'25min'},
+        {day:'Wed', work:'Off', trainingTime:'12:00 PM', whatTraining:'Upper Body', cardioTime:'—', cardioNote:'—'},
+        {day:'Thu', work:'PT clients 10-1', trainingTime:'2:00 PM', whatTraining:'Glutes & Quads', cardioTime:'AM fasted', cardioNote:'35min'},
+        {day:'Fri', work:'Off', trainingTime:'11:00 AM', whatTraining:'Glutes Focus', cardioTime:'—', cardioNote:'—'},
+        {day:'Sat', work:'8am-6pm', trainingTime:'4:00 AM', whatTraining:'Posing + Stairmaster', cardioTime:'AM', cardioNote:'25min stairmaster'},
+        {day:'Sun', work:'Off', trainingTime:'Rest', whatTraining:'Rest', cardioTime:'—', cardioNote:'Meal prep'}
+      ],
+      programTimeline:[
+        {month:'Jul', week:1, date:'2026-07-19', phase:'Prep — Base', avgBW:60.8, trainingKcal:1700, restKcal:1600, prescribedSteps:8500, prescribedCardio:'25min', actualSteps:8300, actualCardio:'25min', sessions:'5/5', notes:'Perfect execution'},
+        {month:'Jul', week:2, date:'2026-07-26', phase:'Prep — Base', avgBW:60.1, trainingKcal:1675, restKcal:1575, prescribedSteps:8700, prescribedCardio:'28min', actualSteps:8500, actualCardio:'28min', sessions:'5/5', notes:'Fantastic consistency'},
+        {month:'Aug', week:3, date:'2026-08-02', phase:'Prep — Peak', avgBW:59.3, trainingKcal:1650, restKcal:1550, prescribedSteps:9000, prescribedCardio:'30min', actualSteps:8900, actualCardio:'30min', sessions:'5/5', notes:'On track for Sept 20'}
+      ],
+      testResults:[],
+      checkins:[
+        { id:uid(), week:1, date:'2026-07-19', days:genWeek(1,61.2,0.1),
+          photos:{front:null,side:null,back:null}, pedEntries:[], supplements:[{timing:'Any Meal', drug:'Multivitamin', dose:'1 tab', frequency:'Daily', notes:''}],
+          sleepHours:'8', sleepRating:5, nutritionFollowed:'Yes', nutritionDetails:'',
+          hunger:2, digestionFeedback:'No issues.', bowelFrequency:'1x per day', waterIntake:'3L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:5, trainingConcerns:'Feeling strong and locked in.', recoveryRating:5,
+          cardioCompleted:'Yes', avgHeartRate:'132bpm', stressRating:1, stressors:'None.', overallAdherence:5,
+          clientNotes:'Great week, feeling strong and locked in.', coachFeedback:'Perfect execution — keep it exactly the same.' },
+        { id:uid(), week:2, date:'2026-07-26', days:genWeek(2,60.4,0.1),
+          photos:{front:null,side:null,back:null}, pedEntries:[], supplements:[{timing:'Any Meal', drug:'Multivitamin', dose:'1 tab', frequency:'Daily', notes:''}],
+          sleepHours:'7.5', sleepRating:4, nutritionFollowed:'Yes', nutritionDetails:'',
+          hunger:3, digestionFeedback:'No issues.', bowelFrequency:'1x per day', waterIntake:'3L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:5, trainingConcerns:'', recoveryRating:4,
+          cardioCompleted:'Yes', avgHeartRate:'133bpm', stressRating:2, stressors:'None.', overallAdherence:5,
+          clientNotes:'Still going well, minor cravings on the weekend but stayed on plan.', coachFeedback:'Fantastic consistency.' },
+        { id:uid(), week:3, date:'2026-08-02', days:genWeek(3,59.7,0.1),
+          photos:{front:null,side:null,back:null}, pedEntries:[], supplements:[{timing:'Any Meal', drug:'Multivitamin', dose:'1 tab', frequency:'Daily', notes:''}],
+          sleepHours:'7.5', sleepRating:4, nutritionFollowed:'Yes', nutritionDetails:'',
+          hunger:2, digestionFeedback:'No issues.', bowelFrequency:'1x per day', waterIntake:'3L',
+          trainingCompleted:'Yes', trainingDetails:'', trainingIntensity:5, trainingConcerns:'Feeling strong, PB on hip thrust this week.', recoveryRating:4,
+          cardioCompleted:'Yes', avgHeartRate:'135bpm', stressRating:2, stressors:'None this week.', overallAdherence:5,
+          clientNotes:'Good week overall, slightly more tired by Friday. All good, thank you!', coachFeedback:'Right on track for Sept 20. Keep steady.' }
+      ]
+    }
+  ];
+}
+
+/* ======================================================================
+   SUPABASE CONFIG + STATE
+   ====================================================================== */
+const SUPABASE_URL = 'https://vcpkmqhgnweejcntovaj.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_V7lx0o-EhDVEo6qJethYmw_lKupbUpw';
+if(typeof window.supabase === 'undefined'){
+  document.getElementById('app').innerHTML = '<div class="loading-screen">Could not load the Supabase library (check your internet connection) — please refresh the page.</div>';
+  throw new Error('supabase-js failed to load');
+}
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let clients = [];
+let state = { role:null, currentClientId:null, page:'dashboard', detailTab:'overview', clientListTab:'active' };
+let session = null;
+let myProfile = null;
+
+function getClient(id){ return clients.find(c=>c.id===id); }
+function showToast(msg, warn){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className = 'toast' + (warn?' warn':'');
+  t.style.display='block';
+  setTimeout(()=>t.style.display='none', 3200);
+}
+
+/* ---- DB row <-> app-shape mapping (keeps every existing render function unchanged) ---- */
+function rowToClient(row){
+  return {
+    id: row.id, name: row.name, initials: row.initials, color: row.color,
+    goal: row.goal, height: row.height, checkinDay: row.checkin_day, coachNotes: row.coach_notes,
+    checkinDays: (row.checkin_days && row.checkin_days.length) ? row.checkin_days : [row.checkin_day || 'Monday'],
+    targets: row.targets || {steps:9000,water:4,sleep:8,cardio:30},
+    mealPlan: { training:[], rest:[], refeed:[], ...(row.meal_plan||{}) },
+    clientMealLog: { training:[], rest:[], refeed:[], ...(row.client_meal_log||{}) },
+    mealDayTypes: (row.meal_day_types && row.meal_day_types.length) ? row.meal_day_types : null,
+    archived: !!row.archived,
+    trainingSplit: row.training_split || [], schedule: row.schedule || [], cardioNotes: row.cardio_notes || '',
+    pedSuppNotes: row.pedsupp_notes || '',
+    invitedEmail: row.invited_email || null, inviteSentAt: row.invite_sent_at || null, hasAccount: false,
+    testResults: [], checkins: []
+  };
+}
+function checkinRowToObj(row){ return { id: row.id, week: row.week, date: row.date, coachReviewed: !!row.coach_reviewed, messages: row.messages || [], ...row.payload }; }
+
+async function resolveSignedUrl(bucket, path){
+  if(!path) return null;
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 3600);
+  if(error){ console.warn('signed url error', bucket, path, error); return null; }
+  return data.signedUrl;
+}
+
+async function fetchClientFull(clientId){
+  const { data: crow, error: cerr } = await sb.from('clients').select('*').eq('id', clientId).single();
+  if(cerr || !crow) throw cerr || new Error('Client not found');
+  const client = rowToClient(crow);
+
+  const { data: cirows, error: cierr } = await sb.from('checkins').select('*').eq('client_id', clientId).order('week');
+  if(cierr) throw cierr;
+  client.checkins = await Promise.all((cirows||[]).map(async row=>{
+    const ci = checkinRowToObj(row);
+    const paths = ci.photos || {front:[],side:[],back:[]};
+    const asArray = v => Array.isArray(v) ? v : (v ? [v] : []); // backward-compat with old single-photo checkins
+    ci.photos = {
+      front: await Promise.all(asArray(paths.front).map(p=>resolveSignedUrl('progress-photos', p))),
+      side: await Promise.all(asArray(paths.side).map(p=>resolveSignedUrl('progress-photos', p))),
+      back: await Promise.all(asArray(paths.back).map(p=>resolveSignedUrl('progress-photos', p)))
+    };
+    return ci;
+  }));
+
+  const { data: trows, error: terr } = await sb.from('test_results').select('*').eq('client_id', clientId).order('date');
+  if(terr) throw terr;
+  client.testResults = await Promise.all((trows||[]).map(async row=>({
+    id: row.id, date: row.date, type: row.type, label: row.label, notes: row.notes,
+    fileName: row.file_name, fileDataUrl: await resolveSignedUrl('test-results', row.file_path)
+  })));
+
+  const { data: plrows, error: plerr } = await sb.from('ped_logs').select('*').eq('client_id', clientId).order('sort_order');
+  if(plerr) throw plerr;
+  client.pedLogs = plrows || [];
+
+  const { data: slrows, error: slerr } = await sb.from('supplement_logs').select('*').eq('client_id', clientId).order('sort_order');
+  if(slerr) throw slerr;
+  client.supplementLogs = slrows || [];
+
+  const { data: ddrow, error: dderr } = await sb.from('daily_drafts').select('*').eq('client_id', clientId).maybeSingle();
+  if(dderr) throw dderr;
+  client.dailyDraft = (ddrow && ddrow.days) || [];
+
+  return client;
+}
+
+async function fetchReferenceData(){
+  const { data, error } = await sb.from('reference_data').select('*').order('name');
+  if(error){ console.error(error); return; }
+  NUTRITION_DB = (data||[]).filter(r=>r.kind==='food').map(r=>({ id:r.id, food:r.name, cals:r.cals, protein:r.protein, carbs:r.carbs, fats:r.fats, unit:r.unit, base:r.base }));
+  PED_REFERENCE = (data||[]).filter(r=>r.kind==='ped').map(r=>({ id:r.id, name:r.name, cat:r.category }));
+  SUPPLEMENT_REFERENCE = (data||[]).filter(r=>r.kind==='supplement').map(r=>({ id:r.id, name:r.name, cat:r.category }));
+}
+
+async function loadAppData(){
+  await fetchReferenceData();
+  if(state.role==='coach'){
+    const { data: crows, error } = await sb.from('clients').select('id').order('created_at');
+    if(error) throw error;
+    clients = await Promise.all((crows||[]).map(r=>fetchClientFull(r.id)));
+    const { data: prows } = await sb.from('profiles').select('client_id').eq('role','client');
+    const withAccounts = new Set((prows||[]).map(p=>p.client_id).filter(Boolean));
+    clients.forEach(c=>{ c.hasAccount = withAccounts.has(c.id); });
+    state.currentClientId = clients[0] ? clients[0].id : null;
+  } else {
+    const cid = myProfile.client_id;
+    if(!cid){ clients=[]; return; }
+    const client = await fetchClientFull(cid);
+    clients = [client];
+    state.currentClientId = client.id;
+  }
+}
+
+/* ======================================================================
+   AUTH
+   ====================================================================== */
+async function initAuth(){
+  const { data:{ session:s } } = await sb.auth.getSession();
+  session = s;
+  if(!session){ renderAuthScreen(); return; }
+  await loadProfileAndApp();
+}
+async function loadProfileAndApp(){
+  const { data: prow, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+  if(error || !prow){
+    renderCompleteProfileScreen();
+    return;
+  }
+  myProfile = prow;
+  state.role = prow.role;
+  state.page = prow.role==='coach' ? 'dashboard' : 'client-dashboard';
+  document.getElementById('app').innerHTML = `<div class="loading-screen">Loading your data…</div>`;
+  try{
+    await loadAppData();
+  }catch(e){
+    document.getElementById('app').innerHTML = `<div class="loading-screen">Could not load data — ${ (e&&e.message)||e }.<br><br>Make sure peakcheck_schema.sql has been run in your Supabase project's SQL Editor.</div>`;
+    return;
+  }
+  render();
+}
+async function handleSignIn(){
+  const email = document.getElementById('auth_email').value.trim();
+  const password = document.getElementById('auth_password').value;
+  const errEl = document.getElementById('authError');
+  errEl.style.display='none';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ errEl.textContent = error.message; errEl.style.display='block'; return; }
+  session = data.session;
+  await loadProfileAndApp();
+}
+async function handleSignUp(){
+  const email = document.getElementById('auth_email').value.trim();
+  const password = document.getElementById('auth_password').value;
+  const errEl = document.getElementById('authError');
+  errEl.style.display='none';
+  if(!email || !password || password.length<6){ errEl.textContent='Enter an email and a password (6+ characters).'; errEl.style.display='block'; return; }
+
+  const { data: exists } = await sb.rpc('coach_exists');
+  if(exists){ errEl.textContent='A coach account already exists for this project — sign in instead.'; errEl.style.display='block'; return; }
+
+  const { data, error } = await sb.auth.signUp({ email, password, options:{ emailRedirectTo: window.location.origin } });
+  if(error){ errEl.textContent = error.message; errEl.style.display='block'; return; }
+
+  if(!data.session){
+    renderAuthScreen('Account created — check your email to confirm it, then sign in.');
+    return;
+  }
+  session = data.session;
+  const profileRow = { id: data.user.id, email, role:'coach', client_id: null };
+  const { error: perr } = await sb.from('profiles').insert(profileRow);
+  if(perr){ errEl.textContent = 'Account created but profile setup failed: '+perr.message; errEl.style.display='block'; return; }
+  await loadProfileAndApp();
+}
+async function handleSignOut(){
+  await sb.auth.signOut();
+  session=null; myProfile=null; clients=[];
+  state = { role:null, currentClientId:null, page:'dashboard', detailTab:'overview' };
+  renderAuthScreen();
+}
+function renderAuthScreen(infoMsg){
+  document.getElementById('app').innerHTML = `
+  <div id="authScreen">
+    <div class="auth-box">
+      <div class="brand"><div class="brand-mark">PC</div><div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div></div>
+      <div class="auth-error" id="authError" style="display:none;"></div>
+      ${infoMsg?`<div class="auth-info">${infoMsg}</div>`:''}
+      <div class="field"><label>Email</label><input type="text" id="auth_email"></div>
+      <div class="field"><label>Password</label><input type="password" id="auth_password" placeholder="6+ characters"></div>
+      <div class="muted" style="font-size:11.5px;margin:2px 0 14px;">Clients: use the invite link your coach emailed you instead of signing up here.</div>
+      <div class="row">
+        <button class="btn" style="flex:1;" onclick="handleSignIn()">Sign In</button>
+        <button class="btn btn-ghost" style="flex:1;" onclick="handleSignUp()">Create Coach Account</button>
+      </div>
+    </div>
+  </div>`;
+}
+async function handleAcceptInvite(){
+  const meta = (session && session.user && session.user.user_metadata) || {};
+  const pw = document.getElementById('cp_password').value;
+  const pw2 = document.getElementById('cp_password2').value;
+  const errEl = document.getElementById('cpError');
+  errEl.style.display='none';
+  if(!pw || pw.length<6){ errEl.textContent='Enter a password (6+ characters).'; errEl.style.display='block'; return; }
+  if(pw!==pw2){ errEl.textContent='Passwords do not match.'; errEl.style.display='block'; return; }
+  const { error: upErr } = await sb.auth.updateUser({ password: pw });
+  if(upErr){ errEl.textContent = upErr.message; errEl.style.display='block'; return; }
+  const profileRow = { id: session.user.id, email: session.user.email, role: meta.role||'client', client_id: meta.client_id||null };
+  const { error: perr } = await sb.from('profiles').insert(profileRow);
+  if(perr){ errEl.textContent = 'Could not finish setup: '+perr.message; errEl.style.display='block'; return; }
+  await loadProfileAndApp();
+}
+async function handleCompleteProfile(){
+  const errEl = document.getElementById('cpError');
+  errEl.style.display='none';
+  const { data: exists } = await sb.rpc('coach_exists');
+  if(exists){ errEl.textContent='A coach account already exists for this project — contact them for an invite instead.'; errEl.style.display='block'; return; }
+  const profileRow = { id: session.user.id, email: session.user.email, role:'coach', client_id: null };
+  const { error: perr } = await sb.from('profiles').insert(profileRow);
+  if(perr){ errEl.textContent = 'Could not finish setup: '+perr.message; errEl.style.display='block'; return; }
+  await loadProfileAndApp();
+}
+function renderCompleteProfileScreen(){
+  const meta = (session && session.user && session.user.user_metadata) || {};
+  const invited = !!(meta.role && meta.client_id);
+  if(invited){
+    document.getElementById('app').innerHTML = `
+    <div id="authScreen">
+      <div class="auth-box">
+        <div class="brand"><div class="brand-mark">PC</div><div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div></div>
+        <div class="auth-info">You've been invited by your coach — set a password to finish creating your account.</div>
+        <div class="auth-error" id="cpError" style="display:none;"></div>
+        <div class="field"><label>Password</label><input type="password" id="cp_password" placeholder="6+ characters"></div>
+        <div class="field"><label>Confirm password</label><input type="password" id="cp_password2" placeholder="6+ characters"></div>
+        <div class="row">
+          <button class="btn" style="flex:1;" onclick="handleAcceptInvite()">Get Started</button>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+  document.getElementById('app').innerHTML = `
+  <div id="authScreen">
+    <div class="auth-box">
+      <div class="brand"><div class="brand-mark">PC</div><div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div></div>
+      <div class="auth-info">You're signed in as ${session.user.email}, but this account isn't linked to a profile yet.</div>
+      <div class="auth-error" id="cpError" style="display:none;"></div>
+      <div class="row">
+        <button class="btn" style="flex:1;" onclick="handleCompleteProfile()">Finish Coach Setup</button>
+        <button class="btn btn-ghost" style="flex:1;" onclick="handleSignOut()">Sign Out and Start Over</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ======================================================================
+   FIELD RENDER HELPERS
+   ====================================================================== */
+function inp(id, value, editable, type, extra){
+  type = type || 'text';
+  extra = extra || '';
+  const v = (value===undefined||value===null) ? '' : value;
+  return `<input type="${type}" id="${id}" value="${String(v).replace(/"/g,'&quot;')}" ${editable?'':'disabled'} ${extra}>`;
+}
+function sel(id, options, value, editable){
+  return `<select id="${id}" ${editable?'':'disabled'}>${options.map(o=>`<option ${o===value?'selected':''}>${o}</option>`).join('')}</select>`;
+}
+
+/* ======================================================================
+   ROOT RENDER
+   ====================================================================== */
+function render(){
+  const app=document.getElementById('app');
+  app.innerHTML = `
+    <datalist id="foodList">${NUTRITION_DB.map(f=>`<option value="${f.food}">`).join('')}</datalist>
+    <datalist id="pedList">${PED_REFERENCE.map(p=>`<option value="${p.name}">`).join('')}</datalist>
+    <datalist id="suppList">${SUPPLEMENT_REFERENCE.map(p=>`<option value="${p.name}">`).join('')}</datalist>
+    <datalist id="freqList">${FREQUENCY_OPTIONS.map(f=>`<option value="${f}">`).join('')}</datalist>
+    <datalist id="timeList">${TIMING_OPTIONS.map(t=>`<option value="${t}">`).join('')}</datalist>
+    ${renderSidebar()}
+    <div id="sidebarBackdrop" onclick="closeSidebar()"></div>
+    <div id="main">
+      ${renderTopbar()}
+      <div id="content">${renderPage()}</div>
+    </div>
+  `;
+  if(document.getElementById('weightChart')) initWeightChart();
+}
+
+function toggleSidebar(){
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebarBackdrop');
+  if(sb) sb.classList.toggle('open');
+  if(bd) bd.classList.toggle('show');
+}
+function closeSidebar(){
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebarBackdrop');
+  if(sb) sb.classList.remove('open');
+  if(bd) bd.classList.remove('show');
+}
+
+function setPage(p){ state.page=p; render(); }
+function setRole(r){ state.role=r; state.page = r==='coach' ? 'dashboard' : 'client-dashboard'; render(); }
+function selectClient(id){ state.currentClientId=id; if(state.role==='coach') state.page='client-detail'; render(); }
+
+/* ======================================================================
+   SIDEBAR / TOPBAR
+   ====================================================================== */
+function renderSidebar(){
+  const coachLinks = [ ['dashboard','&#9638;','Dashboard'], ['clients','&#9776;','All Clients'], ['fooddb','&#127859;','Food Database'], ['peddb','&#8853;','PED Database'], ['suppdb','&#128138;','Supplement Database'] ];
+  const clientLinks = [
+    ['client-dashboard','&#9638;','My Dashboard'], ['client-checkin','&#128203;','PBP Check-In'],
+    ['client-history','&#128337;','Check-In History'], ['client-photos','&#9638;','Progress Photos'],
+    ['client-meal','&#9679;','Meal Plan'], ['client-training','&#9650;','Training Split'],
+    ['client-schedule','&#9689;','Schedule'], ['client-cardio','&#128694;','Cardio & Steps'], ['client-pedsupps','&#8853;','PED & Supplements'],
+    ['client-tests','&#128193;','Test Results']
+  ];
+  const links = state.role==='coach' ? coachLinks : clientLinks;
+  const linkHtml = links.map(([p,icon,label])=>`
+    <div class="navlink ${state.page===p?'active':''}" onclick="setPage('${p}')"><span class="nav-icon">${icon}</span>${label}</div>`).join('');
+
+  let detailNav='';
+  if(state.role==='coach' && state.page==='client-detail'){
+    const tabs=[['overview','Overview'],['history','Check-In History'],['photos','Photos'],['meal','Meal Plan'],['training','Training Split'],['schedule','Schedule'],['cardio','Cardio & Steps'],['pedsupps','PED & Supplements'],['tests','Test Results'],['notes','Coach Notes']];
+    detailNav = `<div class="nav-section-label">Client View</div>` + tabs.map(([t,label])=>`
+      <div class="navlink ${state.detailTab===t?'active':''}" onclick="state.detailTab='${t}';render();" style="font-size:12.5px;">${label}</div>`).join('');
+  }
+
+  return `
+  <div id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">PC</div>
+      <div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div>
+    </div>
+    <div class="nav-section-label">Menu</div>
+    ${linkHtml}
+    ${detailNav}
+    <div class="sidebar-footer">
+      <div class="muted" style="font-size:10.5px;text-align:center;margin-bottom:2px;word-break:break-all;">${myProfile?myProfile.email:''}</div>
+      <button class="btn btn-ghost btn-sm" onclick="handleSignOut()">Sign Out</button>
+    </div>
+  </div>`;
+}
+
+function renderTopbar(){
+  let title='', sub='';
+  if(state.role==='coach'){
+    if(state.page==='dashboard'){ title='Coach Dashboard'; sub='Overview of all active clients'; }
+    else if(state.page==='clients'){ title='All Clients'; sub=`${clients.filter(c=>!c.archived).length} active clients`; }
+    else if(state.page==='fooddb'){ title='Food Database'; sub='Shared reference used across meal plans'; }
+    else if(state.page==='peddb'){ title='PED Database'; sub='Shared compound reference used across client PED logs'; }
+    else if(state.page==='suppdb'){ title='Supplement Database'; sub='Shared reference used across client supplement stacks'; }
+    else if(state.page==='client-detail'){ const c=getClient(state.currentClientId); title=c?c.name:''; sub=c?c.goal:''; }
+  } else {
+    const c=getClient(state.currentClientId);
+    const map={'client-dashboard':'My Dashboard','client-checkin':'PBP Check-In','client-history':'Check-In History','client-photos':'Progress Photos','client-meal':'My Meal Plan','client-training':'My Training Split','client-schedule':'My Schedule','client-cardio':'Cardio & Steps','client-pedsupps':'My PED & Supplements','client-tests':'My Test Results'};
+    title = map[state.page] || 'Dashboard';
+    sub = c ? c.goal : '';
+  }
+  const activeClient = getClient(state.currentClientId);
+  const archiveToggle = (state.role==='coach' && state.page==='client-detail' && activeClient) ? (
+    activeClient.archived
+      ? `<button type="button" class="btn-sm btn-ghost" onclick="setClientArchived('${activeClient.id}',false)">Restore</button>`
+      : `<button type="button" class="btn-sm btn-ghost" onclick="setClientArchived('${activeClient.id}',true)">Archive</button>`
+  ) : '';
+  return `
+  <div id="topbar">
+    <div class="topbar-left">
+      <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">&#9776;</button>
+      <div><div class="page-title">${title}</div><div class="page-sub">${sub}</div></div>
+    </div>
+    <div class="topbar-right">
+      ${archiveToggle}
+      <div class="avatar" style="background:${activeClient?activeClient.color:'#555'}">${activeClient?activeClient.initials:'--'}</div>
+    </div>
+  </div>`;
+}
+
+/* ======================================================================
+   PAGE ROUTER
+   ====================================================================== */
+function renderPage(){
+  if(state.role==='coach'){
+    if(state.page==='dashboard') return renderCoachDashboard();
+    if(state.page==='clients') return renderClientsList();
+    if(state.page==='fooddb') return renderFoodDbPage(true);
+    if(state.page==='peddb') return renderPedDbPage(true);
+    if(state.page==='suppdb') return renderSupplementDbPage(true);
+    if(state.page==='client-detail') return clients.length ? renderClientDetail() : `<div class="empty">No clients yet — add one from All Clients.</div>`;
+    return renderCoachDashboard();
+  } else {
+    if(clients.length===0) return `<div class="empty">Your account isn't linked to a client profile yet. Check with your coach.</div>`;
+    const c = getClient(state.currentClientId);
+    const map={
+      'client-dashboard': ()=>renderClientOwnDashboard(c),
+      'client-checkin': ()=>renderWeeklyCheckinForm(c),
+      'client-history': ()=>renderCheckinsHistoryTab(c, false),
+      'client-photos': ()=>renderPhotosTab(c),
+      'client-meal': ()=>renderMealPlanBlock(c, false),
+      'client-training': ()=>renderTrainingSplitBlock(c, false),
+      'client-schedule': ()=>renderScheduleBlock(c, true),
+      'client-cardio': ()=>renderCardioPlanBlock(c, false),
+      'client-pedsupps': ()=>renderPedSupplementsTab(c, false),
+      'client-tests': ()=>renderTestResultsBlock(c, true),
+    };
+    return (map[state.page]||map['client-dashboard'])();
+  }
+  return '';
+}
+
+/* ======================================================================
+   COACH: DASHBOARD
+   ====================================================================== */
+function latestCheckin(c){ return c.checkins.length ? c.checkins[c.checkins.length-1] : null; }
+function dayAvg(days, key){ if(!days||!days.length) return 0; return days.reduce((a,d)=>a+(parseFloat(d[key])||0),0)/days.length; }
+function hasWeight(ci){ return typeof ci.weight==='number' && !isNaN(ci.weight) && ci.weight>0; }
+function weighedCheckins(c){ return c.checkins.filter(hasWeight); }
+function weightChange(c){
+  const weighed = weighedCheckins(c);
+  if(weighed.length<2) return 0;
+  const first = weighed[0].weight;
+  const last = weighed[weighed.length-1].weight;
+  return (last-first).toFixed(1);
+}
+function daysSinceCheckin(c){
+  const last=latestCheckin(c); if(!last) return Infinity;
+  const d=new Date(last.date); const today=new Date();
+  return Math.round((today-d)/(1000*60*60*24));
+}
+
+function daysAgoLabel(days){
+  if(days===Infinity) return 'never';
+  if(days<=0) return 'today';
+  if(days===1) return '1 day ago';
+  return `${days} days ago`;
+}
+function goToClientHistory(clientId){
+  state.currentClientId = clientId;
+  state.page = 'client-detail';
+  state.detailTab = 'history';
+  render();
+}
+function renderCoachDashboard(){
+  const activeClients = clients.filter(c=>!c.archived);
+  const archivedCount = clients.length - activeClients.length;
+  const withCheckins = activeClients.filter(c=>c.checkins.length>0);
+  const needsReview = withCheckins.filter(c=>{ const lc=latestCheckin(c); return lc && !lc.coachReviewed; })
+    .sort((a,b)=>new Date(latestCheckin(b).date)-new Date(latestCheckin(a).date));
+  const avgAdh = withCheckins.length ? Math.round(withCheckins.reduce((a,c)=>a+(latestCheckin(c).overallAdherence||0),0)/withCheckins.length*20) : 0;
+  return `
+  <div class="grid cards-4" style="margin-bottom:20px;">
+    <div class="card"><div class="stat-label">Active Clients</div><div class="stat-value">${activeClients.length}</div></div>
+    <div class="card"><div class="stat-label">Check-ins This Week</div><div class="stat-value">${activeClients.filter(c=>daysSinceCheckin(c)<=7).length}/${activeClients.length}</div></div>
+    <div class="card"><div class="stat-label">Needs Review</div><div class="stat-value" style="color:var(--accent)">${needsReview.length}</div></div>
+    <div class="card"><div class="stat-label">Avg. Adherence</div><div class="stat-value">${avgAdh}%</div></div>
+  </div>
+  ${needsReview.length>0?`
+  <div class="notif-section-label">Needs review — new check-ins</div>
+  <div class="notif-list">
+    ${needsReview.map(c=>{ const lc=latestCheckin(c); return `
+    <div class="notif-row" onclick="goToClientHistory('${c.id}')">
+      <div class="notif-dot"></div>
+      <div class="avatar" style="background:${c.color}">${c.initials}</div>
+      <div class="notif-row-text"><div class="notif-row-name">${escapeHtml(c.name)}</div><div class="notif-row-sub">Submitted Week ${lc.week} check-in — ${daysAgoLabel(daysSinceCheckin(c))}</div></div>
+      <i class="notif-chevron">&rsaquo;</i>
+    </div>`; }).join('')}
+  </div>`:''}
+  <div class="section-title">Clients</div>
+  <div id="inviteFormWrap"></div>
+  ${activeClients.length===0?`<div class="card"><div class="empty">No active clients yet — add your first one from All Clients.</div></div>`:`<div class="grid cards-3">${activeClients.map(c=>renderClientCard(c)).join('')}</div>`}
+  ${archivedCount>0?`<div class="muted" style="font-size:12.5px;margin-top:16px;cursor:pointer;" onclick="goToArchivedClients()">${archivedCount} archived client${archivedCount===1?'':'s'} — view</div>`:''}`;
+}
+function renderClientCard(c){
+  const lc=latestCheckin(c); const overdue = daysSinceCheckin(c)>7;
+  return `
+  <div class="client-card" onclick="selectClient('${c.id}')">
+    <div class="client-card-top">
+      <div class="avatar" style="background:${c.color}">${c.initials}</div>
+      <div style="flex:1;min-width:0;"><div class="client-card-name">${escapeHtml(c.name)}${c.archived?` <span class="badge" style="background:rgba(154,161,180,.15);color:var(--sub);">Archived</span>`:''}</div><div class="client-card-goal">${escapeHtml(c.goal||'')}</div></div>
+    </div>
+    ${!lc ? `<div class="mini-row"><span>Status</span><span class="badge badge-amber">No check-ins yet</span></div>` : `
+    <div class="mini-row"><span>Current Weight</span><span>${hasWeight(lc)?lc.weight:'—'} kg</span></div>
+    <div class="mini-row"><span>Total Change</span><span class="${weightChange(c)<0?'delta-pos':'delta-neg'}">${weightChange(c)>0?'+':''}${weightChange(c)} kg</span></div>
+    <div class="mini-row"><span>Overall Adherence</span><span>${(lc.overallAdherence||0).toFixed(1)}/5</span></div>
+    <div class="mini-row"><span>Last Check-In</span><span>${overdue?`<span class="badge badge-red">${daysSinceCheckin(c)}d ago</span>`:`<span class="badge badge-green">Up to date</span>`}</span></div>`}
+    ${inviteStatusRow(c)}
+    <div style="margin-top:10px;" onclick="event.stopPropagation();">
+      ${c.archived
+        ? `<button type="button" class="btn-sm btn-ghost" style="width:100%;" onclick="setClientArchived('${c.id}',false)">Restore to Active</button>
+        <button type="button" class="btn-sm btn-ghost" style="width:100%;margin-top:6px;color:var(--red);" onclick="deleteClientPermanently('${c.id}')">Delete Permanently</button>`
+        : `<button type="button" class="btn-sm btn-ghost" style="width:100%;color:var(--sub);" onclick="setClientArchived('${c.id}',true)">Archive Client</button>`}
+    </div>
+  </div>`;
+}
+
+function inviteStatusRow(c){
+  if(c.hasAccount){
+    return `<div class="mini-row"><span>Account</span><span class="badge badge-green">Active</span></div>`;
+  }
+  if(c.invitedEmail){
+    return `<div class="mini-row" onclick="event.stopPropagation();"><span>Invited</span><span style="font-size:11px;text-align:right;">${escapeHtml(c.invitedEmail)}<br><button type="button" class="btn-sm btn-ghost" style="padding:2px 8px;font-size:10.5px;margin-top:2px;" onclick="openInviteForm('${c.id}')">Resend</button></span></div>`;
+  }
+  return `<div class="mini-row" onclick="event.stopPropagation();"><span>Account</span><span><button type="button" class="btn-sm btn-ghost" style="padding:2px 8px;font-size:10.5px;" onclick="openInviteForm('${c.id}')">Send Invite</button></span></div>`;
+}
+let inviteFormClientId = null;
+function openInviteForm(clientId){
+  inviteFormClientId = clientId;
+  const c = getClient(clientId);
+  const wrap = document.getElementById('inviteFormWrap');
+  if(!c || !wrap) return;
+  wrap.innerHTML = `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Invite ${escapeHtml(c.name)}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">They'll get an email with a link to set a password and start using PeakCheck — no code to type in.</p>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field"><label>Client's email</label><input type="email" id="inv_email" value="${escapeHtml(c.invitedEmail||'')}" placeholder="client@email.com"></div>
+      <div class="field" style="flex:0 0 auto;">
+        <button type="button" class="btn btn-sm" id="inv_send_btn" onclick="sendClientInvite()">Send Invite</button>
+        <button type="button" class="btn-sm btn-ghost" onclick="document.getElementById('inviteFormWrap').innerHTML=''">Cancel</button>
+      </div>
+    </div>
+    <div class="auth-error" id="inv_error" style="display:none;"></div>
+  </div>`;
+}
+async function sendClientInvite(){
+  const clientId = inviteFormClientId;
+  const email = document.getElementById('inv_email').value.trim();
+  const errEl = document.getElementById('inv_error');
+  errEl.style.display='none';
+  if(!email || !email.includes('@')){ errEl.textContent='Enter a valid email address.'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('inv_send_btn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try{
+    const { data:{ session:s } } = await sb.auth.getSession();
+    const res = await fetch('/.netlify/functions/invite-client', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+(s?s.access_token:'') },
+      body: JSON.stringify({ email, clientId })
+    });
+    const result = await res.json().catch(()=>({}));
+    if(!res.ok){ throw new Error(result.error || 'Could not send invite'); }
+    const c = getClient(clientId);
+    if(c){ c.invitedEmail = email; c.inviteSentAt = new Date().toISOString(); }
+    const wrap = document.getElementById('inviteFormWrap');
+    if(wrap) wrap.innerHTML = '';
+    showToast(`Invite sent to ${email}`);
+    render();
+  }catch(e){
+    errEl.textContent = e.message; errEl.style.display='block';
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Send Invite'; }
+  }
+}
+async function setClientArchived(clientId, archived){
+  const c = getClient(clientId);
+  if(!c) return;
+  const { error } = await sb.from('clients').update({ archived }).eq('id', clientId);
+  if(error){ showToast('Could not update client: '+error.message, true); return; }
+  c.archived = archived;
+  showToast(archived ? `${c.name} archived — moved out of your active list` : `${c.name} restored to active`);
+  render();
+}
+async function deleteClientPermanently(clientId){
+  const c = getClient(clientId);
+  if(!c) return;
+  if(!confirm(`Permanently delete ${c.name}? This deletes all their check-ins, photos, logs, and their account if they've signed up. This cannot be undone.`)) return;
+  try{
+    const { data:{ session:s } } = await sb.auth.getSession();
+    const res = await fetch('/.netlify/functions/delete-client', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+(s?s.access_token:'') },
+      body: JSON.stringify({ clientId })
+    });
+    const result = await res.json().catch(()=>({}));
+    if(!res.ok){ throw new Error(result.error || 'Could not delete client'); }
+    clients = clients.filter(x=>x.id!==clientId);
+    if(state.currentClientId === clientId){ state.currentClientId = clients[0] ? clients[0].id : null; }
+    showToast(`${c.name} deleted`);
+    render();
+  }catch(e){
+    showToast('Could not delete client: '+e.message, true);
+  }
+}
+function goToArchivedClients(){
+  state.page = 'clients';
+  state.clientListTab = 'archived';
+  render();
+}
+function renderClientsList(){
+  const tab = state.clientListTab || 'active';
+  const activeClients = clients.filter(c=>!c.archived);
+  const archivedClients = clients.filter(c=>c.archived);
+  const shown = tab==='archived' ? archivedClients : activeClients;
+  return `
+  <div class="tabs" id="clientListTabs">
+    <div class="tab${tab==='active'?' active':''}" onclick="state.clientListTab='active';render();">Active (${activeClients.length})</div>
+    <div class="tab${tab==='archived'?' active':''}" onclick="state.clientListTab='archived';render();">Archived (${archivedClients.length})</div>
+  </div>
+  <div style="margin-bottom:16px;"><button class="btn btn-sm" onclick="openAddClientForm()">+ Add Client</button></div>
+  <div id="addClientFormWrap"></div>
+  <div id="inviteFormWrap"></div>
+  ${shown.length===0?`<div class="card"><div class="empty">${tab==='archived'?'No archived clients.':'No active clients yet.'}</div></div>`:`<div class="grid cards-3">${shown.map(c=>renderClientCard(c)).join('')}</div>`}`;
+}
+function openAddClientForm(){
+  document.getElementById('addClientFormWrap').innerHTML = `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>New Client</h3>
+    <div class="row">
+      <div class="field"><label>Name</label><input type="text" id="nc_name"></div>
+      <div class="field"><label>Goal</label><input type="text" id="nc_goal" placeholder="e.g. Summer Shred"></div>
+      <div class="field"><label>Height</label><input type="text" id="nc_height"></div>
+      <div class="field"><label>Check-In Day</label><input type="text" id="nc_checkinday" value="Monday"></div>
+    </div>
+    <button class="btn btn-sm" onclick="createClient()">Create Client</button>
+  </div>`;
+}
+const MEAL_DAY_TYPES = [['training','Training Day'],['rest','Rest Day'],['refeed','Refeed / High Day']];
+function dayTypesFor(c){ return (c.mealDayTypes && c.mealDayTypes.length) ? c.mealDayTypes : MEAL_DAY_TYPES; }
+function defaultMealPlan(){
+  const emptyMeals = () => MEAL_NAMES.map(name=>({ name, time:'', items:[], instructions:'' }));
+  return { training: emptyMeals(), rest: emptyMeals(), refeed: emptyMeals() };
+}
+function defaultSchedule(){
+  return DAY_LABELS.map(day=>({ day, work:'', trainingTime:'', whatTraining:'', cardioTime:'', cardioNote:'' }));
+}
+async function createClient(){
+  const name = document.getElementById('nc_name').value.trim();
+  if(!name){ showToast('Enter a client name', true); return; }
+  const initials = name.split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+  const colors = ['#ff5c35','#4da3ff','#3ddc84','#ffb238','#c792ea','#ff8ac2'];
+  const color = colors[clients.length % colors.length];
+  const checkinDay = document.getElementById('nc_checkinday').value || 'Monday';
+  const { data, error } = await sb.from('clients').insert({
+    name, initials, color,
+    goal: document.getElementById('nc_goal').value, height: document.getElementById('nc_height').value,
+    checkin_day: checkinDay, checkin_days: [checkinDay],
+    meal_plan: defaultMealPlan(),
+    schedule: defaultSchedule(),
+    training_split: [{ label:'Day 1', exercises:[] }]
+  }).select().single();
+  if(error){ showToast('Could not create client: '+error.message, true); return; }
+  const client = rowToClient(data);
+  clients.push(client);
+  state.currentClientId = client.id;
+  render();
+  showToast(`${name} was created — send them an invite from their client card.`);
+}
+
+/* ======================================================================
+   COACH: CLIENT DETAIL ROUTER
+   ====================================================================== */
+function renderClientDetail(){
+  const c=getClient(state.currentClientId);
+  const map={
+    overview: ()=>renderOverviewTab(c),
+    history: ()=>renderCheckinsHistoryTab(c, true),
+    photos: ()=>renderPhotosTab(c),
+    meal: ()=>renderMealPlanBlock(c, true),
+    training: ()=>renderTrainingSplitBlock(c, true),
+    schedule: ()=>renderScheduleBlock(c, true),
+    cardio: ()=>renderCardioPlanBlock(c, true),
+    pedsupps: ()=>renderPedSupplementsTab(c, true),
+    tests: ()=>renderTestResultsBlock(c, true),
+    notes: ()=>renderCoachNotesTab(c),
+  };
+  return (map[state.detailTab]||map.overview)();
+}
+
+function renderTargetsCard(c){
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin-bottom:10px;">Targets</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Set this client's daily targets — including prescribed cardio minutes/day.</p>
+    <div class="row">
+      <div class="field"><label>Steps</label><input type="number" id="tg_steps" value="${c.targets.steps}"></div>
+      <div class="field"><label>Water (L)</label><input type="number" step="0.5" id="tg_water" value="${c.targets.water}"></div>
+      <div class="field"><label>Sleep (hrs)</label><input type="number" step="0.5" id="tg_sleep" value="${c.targets.sleep}"></div>
+      <div class="field"><label>Cardio (min/day)</label><input type="number" id="tg_cardio" value="${c.targets.cardio}"></div>
+    </div>
+    <button class="btn btn-sm" onclick="saveTargets('${c.id}')">Save Targets</button>
+  </div>`;
+}
+async function saveTargets(id){
+  const targets = {
+    steps: parseInt(document.getElementById('tg_steps').value)||0,
+    water: parseFloat(document.getElementById('tg_water').value)||0,
+    sleep: parseFloat(document.getElementById('tg_sleep').value)||0,
+    cardio: parseInt(document.getElementById('tg_cardio').value)||0
+  };
+  const { error } = await sb.from('clients').update({ targets }).eq('id', id);
+  if(error){ showToast('Could not save targets: '+error.message, true); return; }
+  getClient(id).targets = targets;
+  showToast('Targets saved');
+}
+const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+function renderClientInfoCard(c){
+  const days = (c.checkinDays && c.checkinDays.length) ? c.checkinDays : [c.checkinDay||'Monday'];
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin-bottom:10px;">Client Info</h3>
+    <div class="row">
+      <div class="field"><label>Name</label><input type="text" id="ci_name" value="${(c.name||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Goal</label><input type="text" id="ci_goal" value="${(c.goal||'').replace(/"/g,'&quot;')}"></div>
+    </div>
+    <label style="font-size:11px;color:var(--sub);display:block;margin-bottom:6px;">Check-in day(s)</label>
+    <div class="pill-row" id="ci_days_picker" style="margin-bottom:14px;">
+      ${WEEKDAYS_FULL.map(d=>`<div class="day-pick${days.includes(d)?' active':''}" data-day="${d}" onclick="this.classList.toggle('active')">${d.slice(0,3)}</div>`).join('')}
+    </div>
+    <button class="btn btn-sm" onclick="saveClientInfo('${c.id}')">Save Client Info</button>
+  </div>`;
+}
+async function saveClientInfo(id){
+  const name = document.getElementById('ci_name').value.trim();
+  const goal = document.getElementById('ci_goal').value.trim();
+  if(!name){ showToast('Name cannot be empty', true); return; }
+  const days = Array.from(document.querySelectorAll('#ci_days_picker .day-pick.active')).map(el=>el.dataset.day);
+  if(days.length===0){ showToast('Select at least one check-in day', true); return; }
+  const initials = name.split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+  const { error } = await sb.from('clients').update({ name, goal, initials, checkin_day: days[0], checkin_days: days }).eq('id', id);
+  if(error){ showToast('Could not save client info: '+error.message, true); return; }
+  const c = getClient(id);
+  c.name = name; c.goal = goal; c.initials = initials; c.checkinDay = days[0]; c.checkinDays = days;
+  showToast('Client info saved');
+  render();
+}
+function renderOverviewTab(c){
+  const lc=latestCheckin(c); const delta=weightChange(c);
+  if(!lc){
+    return `${renderClientInfoCard(c)}
+    <div class="card"><div class="empty">No check-ins submitted yet. ${c.hasAccount ? 'Once they log in, they can submit their first PBP Check-In.' : "Send this client an invite from All Clients so they can create their login and submit their first PBP Check-In."}</div></div>`;
+  }
+  return `
+  ${renderClientInfoCard(c)}
+  <div class="grid cards-3" style="margin-bottom:16px;">
+    <div class="card"><div class="stat-label">Current Weight</div><div class="stat-value">${hasWeight(lc)?lc.weight:'—'} kg</div><div class="stat-delta ${delta<0?'delta-pos':'delta-neg'}">${delta>0?'+':''}${delta} kg since start</div></div>
+    <div class="card"><div class="stat-label">Overall Adherence (last check-in)</div><div class="stat-value">${(lc.overallAdherence||0).toFixed(1)}/5</div></div>
+    <div class="card"><div class="stat-label">Avg. Daily Steps</div><div class="stat-value">${Math.round(dayAvg(lc.days,'steps')).toLocaleString()}</div></div>
+  </div>
+  <div class="grid cards-2" style="margin-bottom:16px;align-items:start;">
+    <div class="card"><h3>Weight Trend</h3><div class="chart-wrap"><canvas id="weightChart"></canvas></div></div>
+    <div class="card">
+      <h3>Latest Wellness Averages — Week ${lc.week}</h3>
+      ${wellnessBars(lc)}
+      ${(dayAvg(lc.days,'energyGym')<=3.2||dayAvg(lc.days,'sleepHrs')<6.2) ? `<div class="flag-row">&#9888; Low energy/sleep flagged — consider reaching out</div>` : ''}
+    </div>
+  </div>`;
+}
+function renderCoachNotesTab(c){
+  return `<div class="card"><h3>Coach Notes</h3>
+    <p class="muted" style="font-size:12px;margin-top:0;">Private — never shown to the client.</p>
+    <textarea id="coachNotesArea" rows="12">${c.coachNotes||''}</textarea>
+    <div style="margin-top:10px;"><button class="btn btn-sm" onclick="saveCoachNotes('${c.id}')">Save Notes</button></div>
+  </div>`;
+}
+function wellnessBars(lc){
+  const rows=[['Sleep (hrs)', dayAvg(lc.days,'sleepHrs'), 10],['Overall Adherence', lc.overallAdherence||0, 5],['Energy in Gym', dayAvg(lc.days,'energyGym'), 5],['Mood', dayAvg(lc.days,'mood'), 5],['Stress', dayAvg(lc.days,'stress'), 5]];
+  return rows.map(([label,val,max])=>`
+    <div style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px;"><span class="muted">${label}</span><span>${val.toFixed(1)}/${max}</span></div>
+      <div style="background:var(--panel2);border-radius:6px;height:7px;overflow:hidden;"><div style="width:${Math.min(100,val/max*100)}%;height:100%;background:var(--accent);"></div></div>
+    </div>`).join('');
+}
+async function saveCoachNotes(id){
+  const notes = document.getElementById('coachNotesArea').value;
+  const { error } = await sb.from('clients').update({ coach_notes: notes }).eq('id', id);
+  if(error){ showToast('Could not save notes: '+error.message, true); return; }
+  getClient(id).coachNotes = notes;
+  showToast('Coach notes saved');
+}
+
+function initWeightChart(){
+  const canvas=document.getElementById('weightChart');
+  if(typeof Chart === 'undefined'){
+    if(canvas && canvas.parentElement){ canvas.parentElement.innerHTML = '<div class="empty">Chart library failed to load (no internet connection). Weight data is still recorded below.</div>'; }
+    return;
+  }
+  const c=getClient(state.currentClientId); if(!c) return;
+  const labels=[]; const data=[];
+  weighedCheckins(c).forEach(ci=>{ labels.push(`Week ${ci.week}`); data.push(ci.weight); });
+  new Chart(canvas, {
+    type:'line',
+    data:{ labels, datasets:[{ label:'Weight (kg)', data, borderColor:'#ff5c35', backgroundColor:'rgba(255,92,53,0.12)', fill:true, tension:.3, pointRadius:0, borderWidth:2 }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+      scales:{ x:{ ticks:{ color:'#9aa1b4', maxTicksLimit:6, font:{size:10} }, grid:{ color:'#2a2f3d' } }, y:{ ticks:{ color:'#9aa1b4', font:{size:10} }, grid:{ color:'#2a2f3d' } } } }
+  });
+}
+
+/* ======================================================================
+   CHECK-IN HISTORY TAB
+   ====================================================================== */
+function renderCheckinsHistoryTab(c, isCoach){
+  if(c.checkins.length===0) return `<div class="card"><div class="empty">No check-ins submitted yet.</div></div>`;
+  photoGalleries = [];
+  return `
+  <div class="table-wrap card">
+    <table>
+      <tr><th>Week</th><th>Date</th><th>Weight</th><th>Avg Steps</th><th>Avg Sleep</th><th>Overall Adherence</th></tr>
+      ${c.checkins.slice().reverse().map(ci=>`
+        <tr>
+          <td>Week ${ci.week}</td><td>${ci.date}</td><td>${hasWeight(ci)?ci.weight+' kg':'—'}</td><td>${Math.round(dayAvg(ci.days,'steps')).toLocaleString()}</td>
+          <td>${dayAvg(ci.days,'sleepHrs').toFixed(1)}h</td><td>${ci.overallAdherence?ci.overallAdherence+'/5':'—'}</td>
+        </tr>`).join('')}
+    </table>
+  </div>
+  ${c.checkins.slice().reverse().map((ci)=>{
+    const pg = buildCheckinPhotoGallery(ci);
+    return `
+    <details class="card collapsible" style="margin-top:12px;">
+      <summary>Week ${ci.week} — Full Check-In ${!ci.coachReviewed?'<span class="badge badge-amber" style="margin-left:8px;">Needs review</span>':''}</summary>
+      <div style="margin-top:12px;">${renderDailyTable(ci.days, false)}</div>
+      <div class="qa-card" style="margin-top:14px;">
+        ${Object.keys(CHECKIN_QUESTION_LABELS).map(k=>{
+          const v = ci[k]; if(v===undefined||v==='') return '';
+          return `<div class="qa-row"><span>${CHECKIN_QUESTION_LABELS[k]}</span><span>${v}</span></div>`;
+        }).join('')}
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <h3 style="margin-bottom:10px;">Progress Photos</h3>
+        <div class="grid cards-3">
+          ${photoBox('Front', pg.front, pg.gid, 0)}
+          ${photoBox('Side', pg.side, pg.gid, pg.front.length)}
+          ${photoBox('Back', pg.back, pg.gid, pg.front.length+pg.side.length)}
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <h3 style="margin:0;">Feedback</h3>
+          ${isCoach && !ci.coachReviewed ? `<button type="button" class="btn-sm btn-ghost" onclick="markCheckinReviewed('${c.id}','${ci.id}')">Mark Reviewed</button>` : ''}
+        </div>
+        <div class="checkin-feedback-thread">
+          ${(ci.messages||[]).length===0 ? `<div class="muted" style="font-size:12.5px;padding:4px 0;">No messages yet.</div>` : (ci.messages||[]).map(m=>`
+          <div class="checkin-msg checkin-msg-${m.sender==='coach'?'coach':'client'}">
+            <div class="checkin-msg-bubble">${escapeHtml(m.text)}</div>
+            <div class="checkin-msg-meta">${m.sender==='coach'?'Coach':escapeHtml((c.name||'Client').split(' ')[0])} · ${formatMsgTime(m.at)}</div>
+          </div>`).join('')}
+        </div>
+        <div class="checkin-feedback-input">
+          <input type="text" id="fbmsg_${ci.id}" placeholder="${isCoach?`Write feedback for ${escapeHtml((c.name||'').split(' ')[0]||'your client')}...`:'Reply to your coach...'}">
+          <button type="button" class="btn btn-sm" onclick="sendCheckinMessage('${c.id}','${ci.id}','${isCoach?'coach':'client'}')">Send</button>
+        </div>
+      </div>
+    </details>`;
+  }).join('')}`;
+}
+function formatMsgTime(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+}
+async function sendCheckinMessage(clientId, checkinId, sender){
+  const c = getClient(clientId);
+  const ci = c && c.checkins.find(x=>x.id===checkinId);
+  if(!ci) return;
+  const inputEl = document.getElementById('fbmsg_'+checkinId);
+  const text = inputEl ? inputEl.value.trim() : '';
+  if(!text){ showToast('Write a message first', true); return; }
+  const newMessages = [...(ci.messages||[]), { sender, text, at: new Date().toISOString() }];
+  const payload = { messages: newMessages };
+  if(sender==='coach') payload.coach_reviewed = true;
+  const { error } = await sb.from('checkins').update(payload).eq('id', checkinId);
+  if(error){ showToast('Could not send message: '+error.message, true); return; }
+  ci.messages = newMessages;
+  if(sender==='coach') ci.coachReviewed = true;
+  showToast('Message sent');
+  render();
+}
+async function markCheckinReviewed(clientId, checkinId){
+  const c = getClient(clientId);
+  const ci = c && c.checkins.find(x=>x.id===checkinId);
+  if(!ci) return;
+  const { error } = await sb.from('checkins').update({ coach_reviewed: true }).eq('id', checkinId);
+  if(error){ showToast('Could not update: '+error.message, true); return; }
+  ci.coachReviewed = true;
+  showToast('Marked as reviewed');
+  render();
+}
+const CHECKIN_QUESTION_LABELS = {
+  weight:'Weight (kg)', bloodPressure:'Fasted Blood Pressure (L arm)', bloodGlucose:'Fasted Blood Glucose',
+  sleepHours:'Avg sleep hours', sleepRating:'Sleep rating (1-5)', nutritionFollowed:'Followed nutrition plan 100%?',
+  nutritionDetails:'What was different', hunger:'Hunger levels (1-5)', digestionFeedback:'Digestion feedback',
+  bowelFrequency:'Bowel movement frequency', waterIntake:'Average water intake', trainingCompleted:'Completed training 100%?',
+  trainingDetails:'What was done differently', trainingIntensity:'Training intensity (1-5)', trainingConcerns:'Training concerns / strength notes',
+  recoveryRating:'Recovery rating (1-5)', cardioCompleted:'Completed cardio 100%?', avgHeartRate:'Avg cardio heart rate',
+  stressRating:'Stress levels (1-5)', stressors:'Added stressors', overallAdherence:'Overall adherence (1-5)',
+  clientNotes:'How can I help further?'
+};
+
+/* ======================================================================
+   DAILY TRACKER TABLE (used in check-in form + history)
+   ====================================================================== */
+function renderDailyTable(days, editable){
+  return `
+  <div class="table-wrap"><table class="spreadsheet">
+    <tr><th>Day</th>${DAILY_FIELDS.map(f=>`<th>${f.l}</th>`).join('')}</tr>
+    ${DAY_LABELS.map((label,i)=>`
+      <tr>
+        <td><b>${label}</b></td>
+        ${DAILY_FIELDS.map(f=>{
+          const val = days[i] ? days[i][f.k] : '';
+          const id = `d${i}_${f.k}`;
+          if(f.t==='select') return `<td>${sel(id, f.opts, val, editable)}</td>`;
+          return `<td>${inp(id, val, editable, f.t, f.min!==undefined?`min="${f.min}" max="${f.max}"`:(f.step?`step="${f.step}"`:''))}</td>`;
+        }).join('')}
+      </tr>`).join('')}
+  </table></div>`;
+}
+function collectDailyTable(){
+  return DAY_LABELS.map((label,i)=>{
+    const day={};
+    DAILY_FIELDS.forEach(f=>{ const el=document.getElementById(`d${i}_${f.k}`); day[f.k] = el ? el.value : ''; });
+    if(day.weight) day.weight = parseFloat(day.weight)||0;
+    return day;
+  });
+}
+
+/* ======================================================================
+   PHOTOS
+   ====================================================================== */
+let photoGalleries = [];
+function registerGallery(urls, labels){
+  const id = photoGalleries.length;
+  photoGalleries.push({ urls, labels: labels||[] });
+  return id;
+}
+function openLightbox(galleryId, startIdx){
+  const g = photoGalleries[galleryId];
+  if(!g || !g.urls.length) return;
+  closeLightbox();
+  const imgsHtml = g.urls.map((u,i)=>`<div class="lightbox-img-wrap">${g.labels[i]?`<div class="lightbox-label">${g.labels[i]}</div>`:''}<img src="${u}" class="lightbox-img"></div>`).join('');
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.id = 'photoLightbox';
+  overlay.innerHTML = `<button class="lightbox-close" onclick="closeLightbox()">&#10005;</button><div class="lightbox-imgs">${imgsHtml}</div>`;
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeLightbox(); });
+  document.body.appendChild(overlay);
+  setTimeout(()=>{
+    const wraps = overlay.querySelectorAll('.lightbox-img-wrap');
+    if(wraps[startIdx] && wraps[startIdx].scrollIntoView) wraps[startIdx].scrollIntoView({inline:'center', block:'nearest'});
+  }, 30);
+}
+function closeLightbox(){
+  const el = document.getElementById('photoLightbox');
+  if(el) el.remove();
+  document.removeEventListener('keydown', carouselKeyHandler);
+}
+/* Single-photo carousel viewer — used for a check-in's own front/side/back photos.
+   Clicking any thumbnail opens just that photo; arrows step through the rest
+   of that check-in's photos in front -> side -> back order. */
+let carouselState = { galleryId: null, idx: 0 };
+function openPhotoCarousel(galleryId, startIdx){
+  const g = photoGalleries[galleryId];
+  if(!g || !g.urls.length) return;
+  closeLightbox();
+  carouselState = { galleryId, idx: startIdx||0 };
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.id = 'photoLightbox';
+  overlay.innerHTML = renderCarouselContent();
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeLightbox(); });
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', carouselKeyHandler);
+}
+function renderCarouselContent(){
+  const g = photoGalleries[carouselState.galleryId];
+  const idx = carouselState.idx;
+  const label = g.labels[idx] || '';
+  const hasPrev = idx > 0, hasNext = idx < g.urls.length - 1;
+  const multi = g.urls.length > 1;
+  return `
+    <button class="lightbox-close" onclick="closeLightbox()">&#10005;</button>
+    <div class="lightbox-carousel">
+      <button class="lightbox-nav" onclick="carouselStep(-1)" ${hasPrev?'':'disabled'} style="${multi?'':'visibility:hidden;'}">&#10094;</button>
+      <div class="lightbox-img-wrap">
+        ${label?`<div class="lightbox-label">${label}</div>`:''}
+        <img src="${g.urls[idx]}" class="lightbox-img">
+        ${multi?`<div class="lightbox-counter">${idx+1} / ${g.urls.length}</div>`:''}
+      </div>
+      <button class="lightbox-nav" onclick="carouselStep(1)" ${hasNext?'':'disabled'} style="${multi?'':'visibility:hidden;'}">&#10095;</button>
+    </div>`;
+}
+function carouselStep(delta){
+  const g = photoGalleries[carouselState.galleryId];
+  if(!g) return;
+  const newIdx = carouselState.idx + delta;
+  if(newIdx<0 || newIdx>=g.urls.length) return;
+  carouselState.idx = newIdx;
+  const overlay = document.getElementById('photoLightbox');
+  if(overlay) overlay.innerHTML = renderCarouselContent();
+}
+function carouselKeyHandler(e){
+  if(!document.getElementById('photoLightbox')) return;
+  if(e.key==='Escape') closeLightbox();
+  else if(e.key==='ArrowLeft') carouselStep(-1);
+  else if(e.key==='ArrowRight') carouselStep(1);
+}
+function normPhotoUrls(v){ return Array.isArray(v) ? v : (v ? [v] : []); }
+function buildCheckinPhotoGallery(ci){
+  const front = normPhotoUrls(ci.photos.front);
+  const side = normPhotoUrls(ci.photos.side);
+  const back = normPhotoUrls(ci.photos.back);
+  const urls = [...front, ...side, ...back];
+  const labels = [...front.map(()=>'Front'), ...side.map(()=>'Side'), ...back.map(()=>'Back')];
+  const gid = registerGallery(urls, labels);
+  return { gid, front, side, back };
+}
+function renderPhotosTab(c){
+  if(c.checkins.length===0) return `<div class="card"><div class="empty">No check-ins submitted yet.</div></div>`;
+  photoGalleries = [];
+  const compareHtml = c.checkins.length>=2 ? renderPhotoCompareCard(c) : '';
+  return `${compareHtml}<div class="grid" style="grid-template-columns:1fr;gap:20px;">
+    ${c.checkins.slice().reverse().map(ci=>{
+      const g = buildCheckinPhotoGallery(ci);
+      return `
+      <div class="card">
+        <h3 style="margin-bottom:12px;">Week ${ci.week} — ${ci.date}</h3>
+        <div class="grid cards-3">
+          ${photoBox('Front', g.front, g.gid, 0)}
+          ${photoBox('Side', g.side, g.gid, g.front.length)}
+          ${photoBox('Back', g.back, g.gid, g.front.length+g.side.length)}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function photoBox(label, urls, galleryId, offset){
+  urls = Array.isArray(urls) ? urls : (urls?[urls]:[]);
+  offset = offset||0;
+  return `<div>
+    <div class="muted" style="font-size:12px;margin-bottom:6px;">${label}</div>
+    ${urls.length===0 ? `<div class="photo-thumb-empty">No photo</div>` : `
+    <div class="photo-thumbs">
+      ${urls.map((u,i)=>`<div class="photo-thumb" style="background-image:url(${u});cursor:pointer;" onclick="openPhotoCarousel(${galleryId},${offset+i})"></div>`).join('')}
+    </div>`}
+  </div>`;
+}
+let compareSelA = null; // {url, label}
+let compareSelB = null;
+function combinedPhotosFor(ci){
+  const angles = [['front','Front'],['side','Side'],['back','Back']];
+  const out = [];
+  angles.forEach(([key,label])=>{
+    const urls = Array.isArray(ci.photos[key]) ? ci.photos[key] : (ci.photos[key]?[ci.photos[key]]:[]);
+    urls.forEach((u,i)=> out.push({ url: u, label: urls.length>1 ? `${label} ${i+1}` : label }));
+  });
+  return out;
+}
+function jsEsc(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function renderPhotoCompareCard(c){
+  const sorted = c.checkins; // ascending by week already
+  const n = sorted.length;
+  const bIdx = n-1, aIdx = Math.max(0, n-2);
+  const photosA = combinedPhotosFor(sorted[aIdx]);
+  const photosB = combinedPhotosFor(sorted[bIdx]);
+  compareSelA = photosA.length ? { url: photosA[0].url, label: `Week ${sorted[aIdx].week} — ${photosA[0].label}` } : null;
+  compareSelB = photosB.length ? { url: photosB[0].url, label: `Week ${sorted[bIdx].week} — ${photosB[0].label}` } : null;
+  return `
+  <div class="card" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:10px;">Compare Progress Photos</h3>
+    <p class="muted" style="font-size:12px;margin-top:0;">Pick a week on each side, then tap one photo from each to compare them.</p>
+    <div class="row">
+      <div class="field"><label>Week A</label><select id="cmp_a" onchange="updatePhotoCompare('${c.id}')">
+        ${sorted.map((ci,i)=>`<option value="${i}" ${i===aIdx?'selected':''}>Week ${ci.week} — ${ci.date}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Week B</label><select id="cmp_b" onchange="updatePhotoCompare('${c.id}')">
+        ${sorted.map((ci,i)=>`<option value="${i}" ${i===bIdx?'selected':''}>Week ${ci.week} — ${ci.date}</option>`).join('')}
+      </select></div>
+    </div>
+    <div id="photoCompareGrid">${photoCompareGrid(c.id, sorted[aIdx], sorted[bIdx])}</div>
+  </div>`;
+}
+function photoCompareThumbRow(clientId, ci, photos, side){
+  if(photos.length===0) return `<div class="photo-thumb-empty">No photos this week</div>`;
+  const sel = side==='A' ? compareSelA : compareSelB;
+  return `<div class="photo-thumbs">
+    ${photos.map(p=>`<div class="photo-thumb ${sel && sel.url===p.url ? 'photo-thumb-selected':''}" style="background-image:url(${p.url});cursor:pointer;" title="${p.label}" onclick="selectComparePhoto('${clientId}','${side}','${jsEsc(p.url)}','${jsEsc('Week '+ci.week+' — '+p.label)}')"></div>`).join('')}
+  </div>`;
+}
+function photoCompareGrid(clientId, ciA, ciB){
+  const photosA = combinedPhotosFor(ciA);
+  const photosB = combinedPhotosFor(ciB);
+  const combined = [], labels = [];
+  if(compareSelA){ combined.push(compareSelA.url); labels.push(compareSelA.label); }
+  if(compareSelB){ combined.push(compareSelB.url); labels.push(compareSelB.label); }
+  const gid = registerGallery(combined, labels);
+  const bIdxInGallery = compareSelA ? 1 : 0;
+  return `
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;">
+    <div>
+      <div class="muted" style="font-size:11.5px;margin-bottom:8px;">Week ${ciA.week} photos</div>
+      ${photoCompareThumbRow(clientId, ciA, photosA, 'A')}
+    </div>
+    <div>
+      <div class="muted" style="font-size:11.5px;margin-bottom:8px;">Week ${ciB.week} photos</div>
+      ${photoCompareThumbRow(clientId, ciB, photosB, 'B')}
+    </div>
+  </div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;">
+    <div style="text-align:center;">
+      <div class="muted" style="font-size:11px;margin-bottom:6px;">${compareSelA ? escapeHtml(compareSelA.label) : 'Select a photo'}</div>
+      ${compareSelA ? `<div class="photo-compare-preview" style="background-image:url(${compareSelA.url});cursor:pointer;" onclick="openLightbox(${gid},0)"></div>` : `<div class="photo-thumb-empty" style="width:100%;height:180px;">No photo selected</div>`}
+    </div>
+    <div style="text-align:center;">
+      <div class="muted" style="font-size:11px;margin-bottom:6px;">${compareSelB ? escapeHtml(compareSelB.label) : 'Select a photo'}</div>
+      ${compareSelB ? `<div class="photo-compare-preview" style="background-image:url(${compareSelB.url});cursor:pointer;" onclick="openLightbox(${gid},${bIdxInGallery})"></div>` : `<div class="photo-thumb-empty" style="width:100%;height:180px;">No photo selected</div>`}
+    </div>
+  </div>`;
+}
+function selectComparePhoto(clientId, side, url, label){
+  if(side==='A') compareSelA = { url, label }; else compareSelB = { url, label };
+  const c = getClient(clientId);
+  const sorted = c.checkins;
+  const aIdx = parseInt(document.getElementById('cmp_a').value);
+  const bIdx = parseInt(document.getElementById('cmp_b').value);
+  document.getElementById('photoCompareGrid').innerHTML = photoCompareGrid(clientId, sorted[aIdx], sorted[bIdx]);
+}
+function updatePhotoCompare(clientId){
+  const c = getClient(clientId);
+  const sorted = c.checkins;
+  const aIdx = parseInt(document.getElementById('cmp_a').value);
+  const bIdx = parseInt(document.getElementById('cmp_b').value);
+  const photosA = combinedPhotosFor(sorted[aIdx]);
+  const photosB = combinedPhotosFor(sorted[bIdx]);
+  compareSelA = photosA.length ? { url: photosA[0].url, label: `Week ${sorted[aIdx].week} — ${photosA[0].label}` } : null;
+  compareSelB = photosB.length ? { url: photosB[0].url, label: `Week ${sorted[bIdx].week} — ${photosB[0].label}` } : null;
+  document.getElementById('photoCompareGrid').innerHTML = photoCompareGrid(clientId, sorted[aIdx], sorted[bIdx]);
+}
+
+/* ======================================================================
+   CARDIO & STEPS (coach-prescribed, client view-only)
+   ====================================================================== */
+function renderCardioPlanBlock(c, editable){
+  return `
+  <div class="card">
+    <h3 style="margin-bottom:10px;">Cardio & Steps</h3>
+    ${editable ? `
+    <textarea id="cardioNotesArea" rows="10" placeholder="e.g. 30 min incline walk fasted every morning, 10,000 steps daily, add 15 min LISS post-training on leg days...">${c.cardioNotes||''}</textarea>
+    <div style="margin-top:10px;"><button class="btn btn-sm" onclick="saveCardioNotes('${c.id}')">Save Cardio & Steps</button></div>
+    ` : `
+    <p style="white-space:pre-wrap;line-height:1.6;font-size:13.5px;">${c.cardioNotes ? escapeHtml(c.cardioNotes) : 'Your coach hasn\'t set cardio & steps guidance yet.'}</p>
+    `}
+  </div>`;
+}
+async function saveCardioNotes(clientId){
+  const notes = document.getElementById('cardioNotesArea').value;
+  const { error } = await sb.from('clients').update({ cardio_notes: notes }).eq('id', clientId);
+  if(error){ showToast('Could not save cardio notes: '+error.message, true); return; }
+  getClient(clientId).cardioNotes = notes;
+  showToast('Cardio & Steps saved');
+}
+
+/* ======================================================================
+   MEAL PLAN — coach's prescribed plan (c.mealPlan) and the client's own
+   editable food log (c.clientMealLog) share the same rendering + food-picker
+   UI. "target" is 'plan' (coach editing the prescribed plan) or 'log'
+   (client editing their own substitutions) — kept as separate DB columns
+   so the client's edits never overwrite the coach's original plan.
+   ====================================================================== */
+function macroSum(items, key){ return items.reduce((a,it)=>a+(parseFloat(it[key])||0),0); }
+function prescribedMealsFor(c, dayType){
+  return (c.mealPlan[dayType] && c.mealPlan[dayType].length) ? c.mealPlan[dayType] : MEAL_NAMES.map(name=>({ name, time:'', items:[], instructions:'' }));
+}
+function clientMealLogFor(c, dayType){
+  const log = c.clientMealLog && c.clientMealLog[dayType];
+  if(log && log.length) return log;
+  // Not started yet — seed a working copy from the coach's prescribed plan.
+  return prescribedMealsFor(c, dayType).map(m => ({ name: m.name, time: m.time, items: (m.items||[]).map(it=>({...it})) }));
+}
+function mealsForTarget(c, dayType, target){
+  return target==='plan' ? prescribedMealsFor(c, dayType) : clientMealLogFor(c, dayType);
+}
+async function saveMealsForTarget(clientId, dayType, meals, target){
+  const c = getClient(clientId);
+  if(target==='plan'){
+    const newMealPlan = { ...c.mealPlan, [dayType]: meals };
+    const { error } = await sb.from('clients').update({ meal_plan: newMealPlan }).eq('id', clientId);
+    if(error) return { error };
+    c.mealPlan = newMealPlan;
+    return {};
+  }
+  const newLog = { ...c.clientMealLog, [dayType]: meals };
+  const { error } = await sb.from('clients').update({ client_meal_log: newLog }).eq('id', clientId);
+  if(error) return { error };
+  c.clientMealLog = newLog;
+  return {};
+}
+function renderMealPlanBlock(c, editable){
+  const dayTypes = dayTypesFor(c);
+  return `
+  <div class="tabs" id="mealDayTabs">
+    ${dayTypes.map(([key,label],i)=>`<div class="tab${i===0?' active':''}" data-daytype="${key}" onclick="switchMealTab('${key}')">${escapeHtml(label)}${editable && dayTypes.length>1?`<span class="tab-remove" onclick="event.stopPropagation();deleteDayType('${c.id}','${key}')" aria-label="Delete ${escapeHtml(label)}">&#10005;</span>`:''}</div>`).join('')}
+    ${editable?`<div class="tab tab-add" onclick="showAddDayTypeForm('${c.id}')">+ Day Type</div>`:''}
+  </div>
+  <div id="addDayTypeWrap"></div>
+  <div id="mealDayContent">${renderDayContent(c, dayTypes[0][0], editable)}</div>`;
+}
+function switchMealTab(dt){
+  const tabsEl = document.getElementById('mealDayTabs');
+  if(tabsEl) tabsEl.querySelectorAll('.tab[data-daytype]').forEach(t=>t.classList.toggle('active', t.dataset.daytype===dt));
+  const c = getClient(state.currentClientId);
+  const isCoach = state.role==='coach';
+  document.getElementById('mealDayContent').innerHTML = renderDayContent(c, dt, isCoach);
+}
+function showAddDayTypeForm(clientId){
+  document.getElementById('addDayTypeWrap').innerHTML = `
+  <div class="card" style="margin-bottom:16px;">
+    <div class="row" style="align-items:flex-end;">
+      <div class="field"><label>New day type name</label><input type="text" id="newDayTypeName" placeholder="e.g. Peak Week"></div>
+      <div class="field" style="flex:0 0 auto;">
+        <button type="button" class="btn btn-sm" onclick="confirmAddDayType('${clientId}')">Add</button>
+        <button type="button" class="btn-sm btn-ghost" onclick="document.getElementById('addDayTypeWrap').innerHTML=''">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+}
+async function confirmAddDayType(clientId){
+  const nameEl = document.getElementById('newDayTypeName');
+  const label = nameEl.value.trim();
+  if(!label){ showToast('Enter a name for the day type', true); return; }
+  const c = getClient(clientId);
+  const key = 'day_' + label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') + '_' + Date.now().toString(36);
+  const dayTypes = [...dayTypesFor(c), [key, label]];
+  const { error } = await sb.from('clients').update({ meal_day_types: dayTypes }).eq('id', clientId);
+  if(error){ showToast('Could not add day type: '+error.message, true); return; }
+  c.mealDayTypes = dayTypes;
+  showToast(`"${label}" day type added`);
+  render();
+}
+async function deleteDayType(clientId, dayType){
+  const c = getClient(clientId);
+  const dayTypes = dayTypesFor(c);
+  if(dayTypes.length<=1){ showToast('You need at least one day type', true); return; }
+  const label = (dayTypes.find(([k])=>k===dayType)||[,dayType])[1];
+  if(!confirm(`Delete "${label}"? This removes its meal plan and the client's food log for this day type.`)) return;
+  const newDayTypes = dayTypes.filter(([k])=>k!==dayType);
+  const newMealPlan = { ...c.mealPlan }; delete newMealPlan[dayType];
+  const newLog = { ...c.clientMealLog }; delete newLog[dayType];
+  const { error } = await sb.from('clients').update({ meal_day_types: newDayTypes, meal_plan: newMealPlan, client_meal_log: newLog }).eq('id', clientId);
+  if(error){ showToast('Could not delete day type: '+error.message, true); return; }
+  c.mealDayTypes = newDayTypes;
+  c.mealPlan = newMealPlan;
+  c.clientMealLog = newLog;
+  showToast(`"${label}" day type deleted`);
+  render();
+}
+function renderDayContent(c, dayType, isCoach){
+  const meals = mealsForTarget(c, dayType, isCoach?'plan':'log');
+  let summaryHTML;
+  if(isCoach){
+    const t = {cals:0,protein:0,carbs:0,fats:0};
+    meals.forEach(m=>{ t.cals+=macroSum(m.items,'cals'); t.protein+=macroSum(m.items,'protein'); t.carbs+=macroSum(m.items,'carbs'); t.fats+=macroSum(m.items,'fats'); });
+    summaryHTML = `
+    <div class="card macro-summary" style="margin-bottom:16px;">
+      <div class="macro-summary-row"><span>Calories</span><b>${Math.round(t.cals)}</b></div>
+      <div class="macro-summary-row"><span>Protein</span><b>${Math.round(t.protein)}g</b></div>
+      <div class="macro-summary-row"><span>Carbs</span><b>${Math.round(t.carbs)}g</b></div>
+      <div class="macro-summary-row"><span>Fats</span><b>${Math.round(t.fats)}g</b></div>
+    </div>`;
+  } else {
+    const prescribed = prescribedMealsFor(c, dayType);
+    const target = {cals:0,protein:0,carbs:0,fats:0};
+    prescribed.forEach(m=>{ target.cals+=macroSum(m.items,'cals'); target.protein+=macroSum(m.items,'protein'); target.carbs+=macroSum(m.items,'carbs'); target.fats+=macroSum(m.items,'fats'); });
+    const actual = {cals:0,protein:0,carbs:0,fats:0};
+    meals.forEach(m=>{ actual.cals+=macroSum(m.items,'cals'); actual.protein+=macroSum(m.items,'protein'); actual.carbs+=macroSum(m.items,'carbs'); actual.fats+=macroSum(m.items,'fats'); });
+    summaryHTML = `
+    <div class="card macro-summary" style="margin-bottom:16px;">
+      <div class="macro-summary-row"><span>Calories</span><b>${Math.round(actual.cals)}<i>/${Math.round(target.cals)}</i></b></div>
+      <div class="macro-summary-row"><span>Protein</span><b>${Math.round(actual.protein)}<i>/${Math.round(target.protein)}g</i></b></div>
+      <div class="macro-summary-row"><span>Carbs</span><b>${Math.round(actual.carbs)}<i>/${Math.round(target.carbs)}g</i></b></div>
+      <div class="macro-summary-row"><span>Fats</span><b>${Math.round(actual.fats)}<i>/${Math.round(target.fats)}g</i></b></div>
+    </div>`;
+  }
+  return `
+  ${summaryHTML}
+  <div class="card" data-daytype="${dayType}" id="mealDayCard">
+    ${meals.map((meal,mi)=>renderMealBlockUnified(c, dayType, meal, mi, isCoach, meals.length)).join('')}
+    ${isCoach ? `<button type="button" class="btn-sm btn-ghost" onclick="addMealToDay('${c.id}','${dayType}')">+ Add Meal</button>` : `
+    <div class="row" style="margin-top:4px;"><button type="button" class="btn-sm btn-ghost" onclick="resetClientMealLog('${c.id}','${dayType}')">Reset to Coach's Plan</button></div>`}
+  </div>`;
+}
+function renderMealBlockUnified(c, dayType, meal, mi, isCoach, mealCount){
+  const total = {cals:macroSum(meal.items,'cals'), protein:macroSum(meal.items,'protein'), carbs:macroSum(meal.items,'carbs'), fats:macroSum(meal.items,'fats')};
+  const prescribedMeal = isCoach ? meal : (prescribedMealsFor(c, dayType)[mi] || {items:[],instructions:''});
+  let macroLine;
+  if(isCoach){
+    macroLine = `${Math.round(total.cals)} kcal · ${Math.round(total.protein)}p / ${Math.round(total.carbs)}c / ${Math.round(total.fats)}f`;
+  } else {
+    const t = {cals:macroSum(prescribedMeal.items,'cals'), protein:macroSum(prescribedMeal.items,'protein'), carbs:macroSum(prescribedMeal.items,'carbs'), fats:macroSum(prescribedMeal.items,'fats')};
+    macroLine = `${Math.round(total.cals)}/${Math.round(t.cals)} kcal · ${Math.round(total.protein)}/${Math.round(t.protein)}p / ${Math.round(total.carbs)}/${Math.round(t.carbs)}c / ${Math.round(total.fats)}/${Math.round(t.fats)}f`;
+  }
+  const instructions = prescribedMeal.instructions || '';
+  const target = isCoach ? 'plan' : 'log';
+  const popId = `copyPop_${dayType}_${mi}`;
+  return `
+  <div class="meal-block" data-meal-idx="${mi}">
+    <div class="meal-block-header">
+      ${isCoach && mealCount>1 ? `<span class="drag-handle" style="margin-top:6px;" onpointerdown="startMealBlockDrag(event,'${c.id}','${dayType}')" aria-label="Drag to reorder meal">&#10022;&#10022;</span>` : ''}
+      <div style="flex:1;min-width:0;">
+        ${isCoach ? `<input type="text" class="meal-name" value="${(meal.name||'').replace(/"/g,'&quot;')}" placeholder="Meal name" onchange="renameMeal('${c.id}','${dayType}',${mi},this.value)">` : `<h4 style="margin:0;">${escapeHtml(meal.name)}${meal.time?` <span class="muted" style="font-weight:400;">— ${escapeHtml(meal.time)}</span>`:''}</h4>`}
+        <div class="meal-header-macros">${macroLine}</div>
+      </div>
+      ${isCoach ? `<div style="display:flex;gap:6px;flex-shrink:0;">
+        <button type="button" class="icon-btn" onclick="toggleMealCopyPopover('${popId}','${c.id}','${dayType}',${mi})" aria-label="Copy meal">&#128203;</button>
+        <button type="button" class="icon-btn icon-btn-danger" onclick="deleteMeal('${c.id}','${dayType}',${mi})" aria-label="Delete meal">&#128465;</button>
+      </div>` : ''}
+    </div>
+    ${isCoach ? `
+    <div class="meal-copy-popover" id="${popId}" style="display:none;">
+      <div class="row" style="gap:8px;">
+        <div class="field" style="flex:1;"><label>Copy to day</label>
+          <select id="copyDaySel_${dayType}_${mi}" onchange="updateCopyMealSlotOptions('${c.id}','${dayType}',${mi})">
+            ${dayTypesFor(c).map(([k,label])=>`<option value="${k}"${k===dayType?' selected':''}>${escapeHtml(label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="flex:1;"><label>Copy to meal</label>
+          <select id="copySlotSel_${dayType}_${mi}"></select>
+        </div>
+      </div>
+      <button type="button" class="btn-sm" style="width:100%;" onclick="confirmCopyMeal('${c.id}','${dayType}',${mi})">Copy</button>
+    </div>` : ''}
+    <div class="meal-food-rows" data-daytype="${dayType}" data-meal-idx="${mi}">
+      ${meal.items.length===0 ? `<div class="muted" style="font-size:12.5px;padding:6px 0;">No foods added yet.</div>` : meal.items.map((it,ii)=>mealFoodRow(it, c.id, dayType, mi, ii, target, meal.items.length>1)).join('')}
+    </div>
+    <button type="button" class="btn-sm btn-ghost" style="margin-top:8px;" onclick="openFoodPicker('${c.id}','${dayType}',${mi},null,'${target}')">+ Add Food</button>
+    ${isCoach ? `
+    <div class="field" style="margin-top:12px;margin-bottom:0;"><label>Instructions for this meal</label><textarea class="meal-instructions" rows="2" placeholder="e.g. 3iu log when you sit down to eat meal, can add mushroom/onions etc..." onchange="saveMealInstructions('${c.id}','${dayType}',${mi},this.value)">${escapeHtml(instructions)}</textarea></div>
+    ` : (instructions ? `<div class="meal-instructions-read"><div class="meal-instructions-label">Instructions</div><p>${escapeHtml(instructions)}</p></div>` : '')}
+  </div>`;
+}
+function mealFoodRow(item, clientId, dayType, mealIdx, itemIdx, target, multi){
+  const ref = NUTRITION_DB.find(f=>f.food.toLowerCase()===(item.food||'').trim().toLowerCase());
+  const isUnit = ref && ref.unit==='unit';
+  const amount = item.grams ? (isUnit ? `${item.grams} qty` : `${item.grams}g`) : '';
+  return `<div class="food-read-row" style="display:flex;align-items:center;gap:4px;">
+    ${multi ? `<span class="drag-handle" onpointerdown="startFoodRowDrag(event,'${clientId}','${dayType}',${mealIdx},'${target}')" aria-label="Drag to reorder">&#10022;&#10022;</span>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex:1;min-width:0;">
+      <div style="min-width:0;">
+        <div class="food-read-name">${escapeHtml(item.food||'Untitled food')}</div>
+        <div class="food-read-meta">
+          ${amount ? `<span class="food-read-grams">${amount}</span>` : ''}
+          <span class="food-read-macros">${Math.round(item.cals||0)} kcal · ${Math.round(item.protein||0)}p / ${Math.round(item.carbs||0)}c / ${Math.round(item.fats||0)}f</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button type="button" class="icon-btn" onclick="openFoodPicker('${clientId}','${dayType}',${mealIdx},${itemIdx},'${target}')" aria-label="Edit food">&#9998;</button>
+        <button type="button" class="icon-btn icon-btn-danger" onclick="removeMealFoodItem('${clientId}','${dayType}',${mealIdx},${itemIdx},'${target}')" aria-label="Remove food">&#10005;</button>
+      </div>
+    </div>
+  </div>`;
+}
+function startFoodRowDrag(e, clientId, dayType, mealIdx, target){
+  const row = e.target.closest('.food-read-row');
+  if(!row) return;
+  const container = row.closest('.meal-food-rows');
+  if(!container) return;
+  startRowDrag(e, container, '.food-read-row', (from,to)=>reorderMealFoodItem(clientId, dayType, mealIdx, from, to, target));
+}
+async function reorderMealFoodItem(clientId, dayType, mealIdx, fromIdx, toIdx, target){
+  const c = getClient(clientId);
+  const meals = mealsForTarget(c, dayType, target);
+  if(!meals[mealIdx]) return;
+  const items = meals[mealIdx].items;
+  const [moved] = items.splice(fromIdx,1);
+  items.splice(toIdx,0,moved);
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, target);
+  if(error){ showToast('Could not save new order: '+error.message, true); }
+  switchMealTab(dayType);
+}
+async function removeMealFoodItem(clientId, dayType, mealIdx, itemIdx, target){
+  const c = getClient(clientId);
+  const meals = mealsForTarget(c, dayType, target);
+  if(!meals[mealIdx]) return;
+  meals[mealIdx].items.splice(itemIdx,1);
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, target);
+  if(error){ showToast('Could not remove food: '+error.message, true); return; }
+  showToast('Food removed');
+  switchMealTab(dayType);
+}
+async function renameMeal(clientId, dayType, mealIdx, name){
+  const c = getClient(clientId);
+  const meals = prescribedMealsFor(c, dayType);
+  if(!meals[mealIdx]) return;
+  meals[mealIdx].name = name.trim() || `Meal ${mealIdx+1}`;
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
+  if(error){ showToast('Could not rename meal: '+error.message, true); return; }
+  showToast('Meal renamed');
+}
+async function saveMealInstructions(clientId, dayType, mealIdx, text){
+  const c = getClient(clientId);
+  const meals = prescribedMealsFor(c, dayType);
+  if(!meals[mealIdx]) return;
+  meals[mealIdx].instructions = text;
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
+  if(error){ showToast('Could not save instructions: '+error.message, true); return; }
+  showToast('Instructions saved');
+}
+async function addMealToDay(clientId, dayType){
+  const c = getClient(clientId);
+  const meals = prescribedMealsFor(c, dayType);
+  meals.push({ name:`Meal ${meals.length+1}`, time:'', items:[], instructions:'' });
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
+  if(error){ showToast('Could not add meal: '+error.message, true); return; }
+  showToast('Meal added');
+  switchMealTab(dayType);
+}
+async function deleteMeal(clientId, dayType, mealIdx){
+  const c = getClient(clientId);
+  const meals = prescribedMealsFor(c, dayType);
+  if(meals.length<=1){ showToast('A meal day needs at least one meal', true); return; }
+  meals.splice(mealIdx,1);
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
+  if(error){ showToast('Could not delete meal: '+error.message, true); return; }
+  showToast('Meal deleted');
+  switchMealTab(dayType);
+}
+function toggleMealCopyPopover(id, clientId, dayType, mi){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const willOpen = el.style.display === 'none';
+  document.querySelectorAll('.meal-copy-popover').forEach(p=>p.style.display='none');
+  el.style.display = willOpen ? 'block' : 'none';
+  if(willOpen) updateCopyMealSlotOptions(clientId, dayType, mi);
+}
+function updateCopyMealSlotOptions(clientId, dayType, mi){
+  const c = getClient(clientId);
+  const daySel = document.getElementById(`copyDaySel_${dayType}_${mi}`);
+  const slotSel = document.getElementById(`copySlotSel_${dayType}_${mi}`);
+  if(!daySel || !slotSel) return;
+  const targetDayType = daySel.value;
+  const targetMeals = prescribedMealsFor(c, targetDayType);
+  slotSel.innerHTML = targetMeals.map((m,i)=>`<option value="${i}">${escapeHtml(m.name||`Meal ${i+1}`)}</option>`).join('') + `<option value="__new__">+ New meal at end</option>`;
+}
+async function confirmCopyMeal(clientId, dayType, mealIdx){
+  const c = getClient(clientId);
+  const daySel = document.getElementById(`copyDaySel_${dayType}_${mealIdx}`);
+  const slotSel = document.getElementById(`copySlotSel_${dayType}_${mealIdx}`);
+  if(!daySel || !slotSel) return;
+  const targetDayType = daySel.value;
+  const targetSlotVal = slotSel.value;
+  const sourceMeals = prescribedMealsFor(c, dayType);
+  const source = sourceMeals[mealIdx];
+  if(!source) return;
+  const copiedItems = (source.items||[]).map(it=>({...it}));
+  const copiedInstructions = source.instructions||'';
+  const isSameDay = targetDayType === dayType;
+  const targetMeals = prescribedMealsFor(c, targetDayType).map(m=>({...m, items:(m.items||[]).map(it=>({...it}))}));
+  if(targetSlotVal === '__new__'){
+    targetMeals.push({ name: `${source.name} (Copy)`, time: source.time||'', items: copiedItems, instructions: copiedInstructions });
+  } else {
+    const targetIdx = parseInt(targetSlotVal, 10);
+    if(isSameDay && targetIdx === mealIdx){ showToast('Choose a different meal to copy into', true); return; }
+    const dest = targetMeals[targetIdx];
+    if(!dest) return;
+    if((dest.items&&dest.items.length) || dest.instructions){
+      if(!confirm(`Overwrite "${dest.name}" with a copy of "${source.name}"? This replaces its current foods and instructions.`)) return;
+    }
+    dest.items = copiedItems;
+    dest.instructions = copiedInstructions;
+  }
+  const { error } = await saveMealsForTarget(clientId, targetDayType, targetMeals, 'plan');
+  if(error){ showToast('Could not copy meal: '+error.message, true); return; }
+  const label = (dayTypesFor(c).find(([k])=>k===targetDayType)||[,targetDayType])[1];
+  showToast(`Copied to ${label}`);
+  switchMealTab(dayType);
+}
+function startMealBlockDrag(e, clientId, dayType){
+  const row = e.target.closest('.meal-block');
+  if(!row) return;
+  const container = row.parentElement;
+  if(!container) return;
+  startRowDrag(e, container, '.meal-block', (from,to)=>reorderMealBlocks(clientId, dayType, from, to));
+}
+async function reorderMealBlocks(clientId, dayType, fromIdx, toIdx){
+  const c = getClient(clientId);
+  const meals = prescribedMealsFor(c, dayType);
+  const [moved] = meals.splice(fromIdx,1);
+  meals.splice(toIdx,0,moved);
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, 'plan');
+  if(error){ showToast('Could not save new order: '+error.message, true); return; }
+  switchMealTab(dayType);
+}
+async function resetClientMealLog(clientId, dayType){
+  const c = getClient(clientId);
+  const copy = prescribedMealsFor(c, dayType).map(m => ({ name: m.name, time: m.time, items: (m.items||[]).map(it=>({...it})) }));
+  const newLog = { ...c.clientMealLog, [dayType]: copy };
+  const { error } = await sb.from('clients').update({ client_meal_log: newLog }).eq('id', clientId);
+  if(error){ showToast('Could not reset: '+error.message, true); return; }
+  c.clientMealLog = newLog;
+  showToast("Reset to your coach's plan");
+  switchMealTab(dayType);
+}
+
+/* ======================================================================
+   FOOD PICKER — full-screen overlay used by both coach (editing the
+   prescribed plan) and client (editing their own food log) to search the
+   Food Database and add/edit a single food item on a specific meal.
+   ====================================================================== */
+let foodPickerCtx = null;
+let foodPickerQuery = '';
+function openFoodPicker(clientId, dayType, mealIdx, itemIdx, target){
+  const c = getClient(clientId);
+  const meals = mealsForTarget(c, dayType, target);
+  const meal = meals[mealIdx];
+  foodPickerCtx = { clientId, dayType, mealIdx, itemIdx: (itemIdx===null||itemIdx===undefined)?null:itemIdx, target, selected:null, qty:'' };
+  foodPickerQuery = '';
+  if(foodPickerCtx.itemIdx!=null && meal){
+    const item = meal.items[foodPickerCtx.itemIdx];
+    if(item){
+      const ref = NUTRITION_DB.find(f=>f.food.toLowerCase()===(item.food||'').toLowerCase());
+      foodPickerCtx.selected = ref || { food:item.food, cals:item.cals, protein:item.protein, carbs:item.carbs, fats:item.fats, unit:'g', base:item.grams||100 };
+      foodPickerCtx.qty = item.grams!=null ? String(item.grams) : '';
+      foodPickerQuery = item.food || '';
+    }
+  }
+  document.body.insertAdjacentHTML('beforeend', foodPickerHTML());
+}
+function closeFoodPicker(){
+  foodPickerCtx = null;
+  const el = document.getElementById('foodPickerOverlay');
+  if(el) el.remove();
+}
+function foodPickerHTML(){
+  const q = foodPickerQuery.trim().toLowerCase();
+  const results = NUTRITION_DB.filter(f=>!q || f.food.toLowerCase().includes(q)).slice(0,30);
+  const c = getClient(foodPickerCtx.clientId);
+  const meals = mealsForTarget(c, foodPickerCtx.dayType, foodPickerCtx.target);
+  const meal = meals[foodPickerCtx.mealIdx];
+  const mealName = meal ? meal.name : 'meal';
+  const editing = foodPickerCtx.itemIdx!=null;
+  return `
+  <div class="lightbox-overlay" id="foodPickerOverlay" style="align-items:flex-start;">
+    <div class="food-picker-panel">
+      <div class="food-picker-header">
+        <button type="button" class="menu-btn" style="display:flex;" onclick="closeFoodPicker()" aria-label="Close">&#8592;</button>
+        <div style="font-weight:800;font-size:15px;">${editing?'Edit food':'Add food'} — ${escapeHtml(mealName)}</div>
+      </div>
+      <input type="text" id="foodPickerSearch" placeholder="Search food database..." value="${foodPickerQuery.replace(/"/g,'&quot;')}" oninput="updateFoodPickerQuery(this.value)" autocomplete="off">
+      <div class="food-picker-list">
+        ${results.length===0 ? `<div class="muted" style="font-size:12.5px;padding:10px 0;">No matches — ask your coach to add it to the Food Database.</div>` : results.map(f=>`
+        <div class="food-picker-row${foodPickerCtx.selected && foodPickerCtx.selected.food===f.food?' selected':''}">
+          <div style="min-width:0;">
+            <div style="font-weight:700;font-size:13.5px;">${escapeHtml(f.food)}</div>
+            <div class="muted" style="font-size:11.5px;">${Math.round(f.cals)} kcal / ${f.unit==='unit'?'unit':'100g'}</div>
+          </div>
+          <button type="button" class="btn-sm ${foodPickerCtx.selected && foodPickerCtx.selected.food===f.food?'':'btn-ghost'}" onclick="selectFoodInPicker('${f.food.replace(/'/g,"\\'")}')">${foodPickerCtx.selected && foodPickerCtx.selected.food===f.food ? 'Selected' : 'Select'}</button>
+        </div>`).join('')}
+      </div>
+      ${foodPickerCtx.selected ? `
+      <div class="food-picker-selected">
+        <div class="muted" style="font-size:12px;margin-bottom:8px;">Selected: <b style="color:var(--text);">${escapeHtml(foodPickerCtx.selected.food)}</b></div>
+        <div class="row" style="align-items:flex-end;">
+          <div class="field"><label>${foodPickerCtx.selected.unit==='unit'?'Qty':'Grams'}</label><input type="number" id="foodPickerQty" value="${foodPickerCtx.qty||''}" oninput="foodPickerCtx.qty=this.value"></div>
+          <div class="field" style="flex:0 0 auto;"><button type="button" class="btn btn-sm" onclick="confirmFoodPicker()">${editing?'Save Changes':'Add to Meal'}</button></div>
+        </div>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+function updateFoodPickerQuery(v){
+  foodPickerQuery = v;
+  const el = document.getElementById('foodPickerOverlay');
+  if(!el) return;
+  el.outerHTML = foodPickerHTML();
+  const input = document.getElementById('foodPickerSearch');
+  if(input){ input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
+}
+function selectFoodInPicker(foodName){
+  const f = NUTRITION_DB.find(x=>x.food===foodName);
+  if(!f || !foodPickerCtx) return;
+  foodPickerCtx.selected = f;
+  const el = document.getElementById('foodPickerOverlay');
+  if(el) el.outerHTML = foodPickerHTML();
+}
+async function confirmFoodPicker(){
+  if(!foodPickerCtx || !foodPickerCtx.selected){ showToast('Select a food first', true); return; }
+  const qtyEl = document.getElementById('foodPickerQty');
+  const qty = parseFloat(qtyEl.value)||0;
+  if(!qty){ showToast('Enter a quantity', true); return; }
+  const f = foodPickerCtx.selected;
+  const factor = qty / (f.base||100);
+  const newItem = { food:f.food, grams:qty, cals:Math.round(f.cals*factor), protein:+(f.protein*factor).toFixed(1), carbs:+(f.carbs*factor).toFixed(1), fats:+(f.fats*factor).toFixed(1) };
+  const { clientId, dayType, mealIdx, itemIdx, target } = foodPickerCtx;
+  const c = getClient(clientId);
+  const meals = mealsForTarget(c, dayType, target);
+  const meal = meals[mealIdx];
+  if(!meal){ closeFoodPicker(); return; }
+  if(itemIdx!=null) meal.items[itemIdx] = newItem;
+  else meal.items.push(newItem);
+  const { error } = await saveMealsForTarget(clientId, dayType, meals, target);
+  if(error){ showToast('Could not save: '+error.message, true); closeFoodPicker(); return; }
+  const wasEdit = itemIdx!=null;
+  closeFoodPicker();
+  showToast(wasEdit ? 'Food updated' : 'Food added');
+  switchMealTab(dayType);
+}
+
+/* ======================================================================
+   FOOD DATABASE PAGE
+   ====================================================================== */
+function renderFoodDbPage(editable){
+  return `
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <h3 style="margin-bottom:10px;">Nutrition Database</h3>
+      ${editable?`<button class="btn-sm btn-ghost" onclick="importStarterFoods()">Import Starter List (${STARTER_FOODS.length} items)</button>`:''}
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Used for autocomplete + auto macro-fill when building meal plans. Values are per 100g unless "unit" is noted.</p>
+    <div class="table-wrap"><table>
+      <tr><th>Food</th><th>Cals</th><th>Protein</th><th>Carbs</th><th>Fats</th><th>Unit</th>${editable?'<th></th>':''}</tr>
+      ${NUTRITION_DB.map((f,i)=> editable && editingFoodDbIdx===i ? foodDbEditRow(f,i) : foodDbReadRow(f,i,editable)).join('')}
+    </table></div>
+  </div>
+  ${editable?`
+  <div class="card" style="margin-top:16px;">
+    <h3>Add Food</h3>
+    <div class="row">
+      <div class="field"><label>Food Name</label><input type="text" id="nf_name"></div>
+      <div class="field"><label>Cals</label><input type="number" id="nf_cals"></div>
+      <div class="field"><label>Protein (g)</label><input type="number" id="nf_pro"></div>
+      <div class="field"><label>Carbs (g)</label><input type="number" id="nf_cho"></div>
+      <div class="field"><label>Fats (g)</label><input type="number" id="nf_fat"></div>
+      <div class="field"><label>Base</label><select id="nf_base"><option value="100">Per 100g</option><option value="1">Per Unit</option></select></div>
+    </div>
+    <button class="btn btn-sm" onclick="addFoodToDb()">Add to Database</button>
+  </div>`:''}`;
+}
+let editingFoodDbIdx = null;
+function foodDbReadRow(f,i,editable){
+  return `<tr><td>${escapeHtml(f.food)}</td><td>${f.cals}</td><td>${f.protein}g</td><td>${f.carbs}g</td><td>${f.fats}g</td><td>${f.unit}${f.base===1?' (per unit)':' /100g'}</td>${editable?`<td style="display:flex;gap:6px;"><button type="button" class="btn-sm btn-ghost" onclick="startEditFoodDb(${i})">Edit</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeFoodFromDb(${i})">Remove</button></td>`:''}</tr>`;
+}
+function foodDbEditRow(f,i){
+  return `<tr>
+    <td><input type="text" id="ef_name_${i}" value="${(f.food||'').replace(/"/g,'&quot;')}" style="width:130px;"></td>
+    <td><input type="number" id="ef_cals_${i}" value="${f.cals}" style="width:60px;"></td>
+    <td><input type="number" id="ef_pro_${i}" value="${f.protein}" style="width:55px;"></td>
+    <td><input type="number" id="ef_cho_${i}" value="${f.carbs}" style="width:55px;"></td>
+    <td><input type="number" id="ef_fat_${i}" value="${f.fats}" style="width:55px;"></td>
+    <td><select id="ef_base_${i}"><option value="100"${f.base!==1?' selected':''}>Per 100g</option><option value="1"${f.base===1?' selected':''}>Per Unit</option></select></td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm" onclick="saveFoodDbEdit(${i})">Save</button><button type="button" class="btn-sm btn-ghost" onclick="cancelEditFoodDb()">Cancel</button></td>
+  </tr>`;
+}
+function startEditFoodDb(i){ editingFoodDbIdx = i; render(); }
+function cancelEditFoodDb(){ editingFoodDbIdx = null; render(); }
+async function saveFoodDbEdit(i){
+  const item = NUTRITION_DB[i];
+  if(!item) return;
+  const name = document.getElementById(`ef_name_${i}`).value.trim();
+  if(!name){ showToast('Enter a food name', true); return; }
+  const base = parseFloat(document.getElementById(`ef_base_${i}`).value)||100;
+  const updated = {
+    food:name, cals:parseFloat(document.getElementById(`ef_cals_${i}`).value)||0,
+    protein:parseFloat(document.getElementById(`ef_pro_${i}`).value)||0, carbs:parseFloat(document.getElementById(`ef_cho_${i}`).value)||0,
+    fats:parseFloat(document.getElementById(`ef_fat_${i}`).value)||0, unit:(base===1?'unit':'g'), base
+  };
+  const { error } = await sb.from('reference_data').update({
+    name:updated.food, cals:updated.cals, protein:updated.protein, carbs:updated.carbs, fats:updated.fats, unit:updated.unit, base:updated.base
+  }).eq('id', item.id);
+  if(error){ showToast('Could not save changes: '+error.message, true); return; }
+  Object.assign(item, updated);
+  editingFoodDbIdx = null;
+  render(); showToast('Food updated');
+}
+async function addFoodToDb(){
+  const name = document.getElementById('nf_name').value.trim();
+  if(!name){ showToast('Enter a food name', true); return; }
+  const base = parseFloat(document.getElementById('nf_base').value)||100;
+  const newFood = {
+    food:name, cals:parseFloat(document.getElementById('nf_cals').value)||0,
+    protein:parseFloat(document.getElementById('nf_pro').value)||0, carbs:parseFloat(document.getElementById('nf_cho').value)||0,
+    fats:parseFloat(document.getElementById('nf_fat').value)||0, unit:(base===1?'unit':'g'), base
+  };
+  const { data, error } = await sb.from('reference_data').insert({
+    kind:'food', name:newFood.food, cals:newFood.cals, protein:newFood.protein, carbs:newFood.carbs, fats:newFood.fats, unit:newFood.unit, base:newFood.base
+  }).select().single();
+  if(error){ showToast('Could not add food: '+error.message, true); return; }
+  newFood.id = data.id;
+  NUTRITION_DB.push(newFood);
+  render(); showToast('Food added to database');
+}
+async function removeFoodFromDb(idx){
+  const item = NUTRITION_DB[idx];
+  const { error } = await sb.from('reference_data').delete().eq('id', item.id);
+  if(error){ showToast('Could not remove food: '+error.message, true); return; }
+  NUTRITION_DB.splice(idx,1);
+  render(); showToast('Food removed from database');
+}
+async function importStarterFoods(){
+  const existing = new Set(NUTRITION_DB.map(f=>f.food.toLowerCase()));
+  const toAdd = STARTER_FOODS.filter(f=>!existing.has(f.food.toLowerCase()));
+  if(toAdd.length===0){ showToast('Starter foods are already in your database'); return; }
+  const rows = toAdd.map(f=>({ kind:'food', name:f.food, cals:f.cals, protein:f.protein, carbs:f.carbs, fats:f.fats, unit:f.unit, base:f.base }));
+  const { data, error } = await sb.from('reference_data').insert(rows).select();
+  if(error){ showToast('Import failed: '+error.message, true); return; }
+  data.forEach(r=>NUTRITION_DB.push({ id:r.id, food:r.name, cals:r.cals, protein:r.protein, carbs:r.carbs, fats:r.fats, unit:r.unit, base:r.base }));
+  render(); showToast(`Imported ${data.length} foods`);
+}
+
+/* ======================================================================
+   PED DATABASE PAGE (coach-managed, mirrors Food Database)
+   ====================================================================== */
+function renderPedDbPage(editable){
+  return `
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <h3 style="margin-bottom:10px;">PED / Compound Database</h3>
+      ${editable?`<button class="btn-sm btn-ghost" onclick="importStarterPeds()">Import Starter List (${STARTER_PEDS.length} items)</button>`:''}
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Anabolics, orals, ancillaries, peptides & other performance compounds. Used for autocomplete on every client's PED Cycle Log.</p>
+    <div class="table-wrap"><table>
+      <tr><th>Compound</th><th>Category</th>${editable?'<th></th>':''}</tr>
+      ${PED_REFERENCE.map((p,i)=> editable && editingPedDbIdx===i ? pedDbEditRow(p,i) : pedDbReadRow(p,i,editable)).join('')}
+    </table></div>
+  </div>
+  ${editable?`
+  <div class="card" style="margin-top:16px;">
+    <h3>Add Compound</h3>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field"><label>Compound Name</label><input type="text" id="pd_name" placeholder="e.g. Testosterone Enanthate"></div>
+      <div class="field"><label>Category</label><select id="pd_cat"><option>Anabolic</option><option>Oral</option><option>Ancillary</option><option>Peptide</option><option>Other</option></select></div>
+      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addPedToDb()">Add to Database</button></div>
+    </div>
+  </div>`:''}
+  <div class="disclaimer">Logged for coach oversight and client record-keeping only — not medical advice.</div>`;
+}
+let editingPedDbIdx = null;
+const PED_CATEGORIES = ['Anabolic','Oral','Ancillary','Peptide','Other'];
+function pedDbReadRow(p,i,editable){
+  return `<tr><td>${escapeHtml(p.name)}</td><td>${pedTag(p.name)}</td>${editable?`<td style="display:flex;gap:6px;"><button type="button" class="btn-sm btn-ghost" onclick="startEditPedDb(${i})">Edit</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" onclick="removePedFromDb(${i})">Remove</button></td>`:''}</tr>`;
+}
+function pedDbEditRow(p,i){
+  return `<tr>
+    <td><input type="text" id="ep_name_${i}" value="${(p.name||'').replace(/"/g,'&quot;')}"></td>
+    <td><select id="ep_cat_${i}">${PED_CATEGORIES.map(c=>`<option${c===p.cat?' selected':''}>${c}</option>`).join('')}</select></td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm" onclick="savePedDbEdit(${i})">Save</button><button type="button" class="btn-sm btn-ghost" onclick="cancelEditPedDb()">Cancel</button></td>
+  </tr>`;
+}
+function startEditPedDb(i){ editingPedDbIdx = i; render(); }
+function cancelEditPedDb(){ editingPedDbIdx = null; render(); }
+async function savePedDbEdit(i){
+  const item = PED_REFERENCE[i];
+  if(!item) return;
+  const name = document.getElementById(`ep_name_${i}`).value.trim();
+  if(!name){ showToast('Enter a compound name', true); return; }
+  const cat = document.getElementById(`ep_cat_${i}`).value;
+  const { error } = await sb.from('reference_data').update({ name, category:cat }).eq('id', item.id);
+  if(error){ showToast('Could not save changes: '+error.message, true); return; }
+  item.name = name; item.cat = cat;
+  editingPedDbIdx = null;
+  render(); showToast('Compound updated');
+}
+async function addPedToDb(){
+  const name = document.getElementById('pd_name').value.trim();
+  if(!name){ showToast('Enter a compound name', true); return; }
+  const cat = document.getElementById('pd_cat').value;
+  const { data, error } = await sb.from('reference_data').insert({ kind:'ped', name, category:cat }).select().single();
+  if(error){ showToast('Could not add compound: '+error.message, true); return; }
+  PED_REFERENCE.push({name, cat, id:data.id});
+  render(); showToast('Compound added to PED database');
+}
+async function removePedFromDb(idx){
+  const item = PED_REFERENCE[idx];
+  const { error } = await sb.from('reference_data').delete().eq('id', item.id);
+  if(error){ showToast('Could not remove compound: '+error.message, true); return; }
+  PED_REFERENCE.splice(idx,1);
+  render(); showToast('Compound removed from PED database');
+}
+async function importStarterPeds(){
+  const existing = new Set(PED_REFERENCE.map(p=>p.name.toLowerCase()));
+  const toAdd = STARTER_PEDS.filter(p=>!existing.has(p.name.toLowerCase()));
+  if(toAdd.length===0){ showToast('Starter compounds are already in your database'); return; }
+  const rows = toAdd.map(p=>({ kind:'ped', name:p.name, category:p.cat }));
+  const { data, error } = await sb.from('reference_data').insert(rows).select();
+  if(error){ showToast('Import failed: '+error.message, true); return; }
+  data.forEach(r=>PED_REFERENCE.push({ id:r.id, name:r.name, cat:r.category }));
+  render(); showToast(`Imported ${data.length} compounds`);
+}
+
+/* ======================================================================
+   SUPPLEMENT DATABASE PAGE (coach-managed, mirrors Food Database)
+   ====================================================================== */
+function renderSupplementDbPage(editable){
+  return `
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <h3 style="margin-bottom:10px;">Supplement Database</h3>
+      ${editable?`<button class="btn-sm btn-ghost" onclick="importStarterSupplements()">Import Starter List (${STARTER_SUPPLEMENTS.length} items)</button>`:''}
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Vitamins, minerals & general supplements — kept separate from the PED database. Used for autocomplete on every client's Supplement Stack.</p>
+    <div class="table-wrap"><table>
+      <tr><th>Supplement</th><th>Category</th>${editable?'<th></th>':''}</tr>
+      ${SUPPLEMENT_REFERENCE.map((s,i)=> editable && editingSupplementDbIdx===i ? supplementDbEditRow(s,i) : supplementDbReadRow(s,i,editable)).join('')}
+    </table></div>
+  </div>
+  ${editable?`
+  <div class="card" style="margin-top:16px;">
+    <h3>Add Supplement</h3>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field"><label>Supplement Name</label><input type="text" id="sd_name" placeholder="e.g. Vitamin D3 + K2"></div>
+      <div class="field"><label>Category</label><select id="sd_cat"><option>Vitamin</option><option>Mineral</option><option>General</option><option>Liver Support</option><option>Cardiovascular</option></select></div>
+      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addSupplementToDb()">Add to Database</button></div>
+    </div>
+  </div>`:''}`;
+}
+let editingSupplementDbIdx = null;
+const SUPPLEMENT_CATEGORIES = ['Vitamin','Mineral','General','Liver Support','Cardiovascular'];
+function supplementDbReadRow(s,i,editable){
+  return `<tr><td>${escapeHtml(s.name)}</td><td><span class="badge badge-blue">${s.cat}</span></td>${editable?`<td style="display:flex;gap:6px;"><button type="button" class="btn-sm btn-ghost" onclick="startEditSupplementDb(${i})">Edit</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeSupplementFromDb(${i})">Remove</button></td>`:''}</tr>`;
+}
+function supplementDbEditRow(s,i){
+  return `<tr>
+    <td><input type="text" id="es_name_${i}" value="${(s.name||'').replace(/"/g,'&quot;')}"></td>
+    <td><select id="es_cat_${i}">${SUPPLEMENT_CATEGORIES.map(c=>`<option${c===s.cat?' selected':''}>${c}</option>`).join('')}</select></td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm" onclick="saveSupplementDbEdit(${i})">Save</button><button type="button" class="btn-sm btn-ghost" onclick="cancelEditSupplementDb()">Cancel</button></td>
+  </tr>`;
+}
+function startEditSupplementDb(i){ editingSupplementDbIdx = i; render(); }
+function cancelEditSupplementDb(){ editingSupplementDbIdx = null; render(); }
+async function saveSupplementDbEdit(i){
+  const item = SUPPLEMENT_REFERENCE[i];
+  if(!item) return;
+  const name = document.getElementById(`es_name_${i}`).value.trim();
+  if(!name){ showToast('Enter a supplement name', true); return; }
+  const cat = document.getElementById(`es_cat_${i}`).value;
+  const { error } = await sb.from('reference_data').update({ name, category:cat }).eq('id', item.id);
+  if(error){ showToast('Could not save changes: '+error.message, true); return; }
+  item.name = name; item.cat = cat;
+  editingSupplementDbIdx = null;
+  render(); showToast('Supplement updated');
+}
+async function addSupplementToDb(){
+  const name = document.getElementById('sd_name').value.trim();
+  if(!name){ showToast('Enter a supplement name', true); return; }
+  const cat = document.getElementById('sd_cat').value;
+  const { data, error } = await sb.from('reference_data').insert({ kind:'supplement', name, category:cat }).select().single();
+  if(error){ showToast('Could not add supplement: '+error.message, true); return; }
+  SUPPLEMENT_REFERENCE.push({name, cat, id:data.id});
+  render(); showToast('Supplement added to database');
+}
+async function removeSupplementFromDb(idx){
+  const item = SUPPLEMENT_REFERENCE[idx];
+  const { error } = await sb.from('reference_data').delete().eq('id', item.id);
+  if(error){ showToast('Could not remove supplement: '+error.message, true); return; }
+  SUPPLEMENT_REFERENCE.splice(idx,1);
+  render(); showToast('Supplement removed from database');
+}
+async function importStarterSupplements(){
+  const existing = new Set(SUPPLEMENT_REFERENCE.map(s=>s.name.toLowerCase()));
+  const toAdd = STARTER_SUPPLEMENTS.filter(s=>!existing.has(s.name.toLowerCase()));
+  if(toAdd.length===0){ showToast('Starter supplements are already in your database'); return; }
+  const rows = toAdd.map(s=>({ kind:'supplement', name:s.name, category:s.cat }));
+  const { data, error } = await sb.from('reference_data').insert(rows).select();
+  if(error){ showToast('Import failed: '+error.message, true); return; }
+  data.forEach(r=>SUPPLEMENT_REFERENCE.push({ id:r.id, name:r.name, cat:r.category }));
+  render(); showToast(`Imported ${data.length} supplements`);
+}
+
+/* ======================================================================
+   TRAINING SPLIT
+   ====================================================================== */
+function normalizeExercises(exercises){
+  return (exercises||[]).map(ex => typeof ex === 'string' ? { name: ex, reps:'', notes:'' } : ex);
+}
+function exerciseRowHTML(ex){
+  ex = ex || {};
+  return `<tr>
+    <td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startExerciseRowDrag(event)" aria-label="Drag to reorder">&#10022;&#10022;</span></td>
+    <td><input type="text" class="exercise-name" value="${(ex.name||'').replace(/"/g,'&quot;')}" placeholder="Exercise"></td>
+    <td><input type="text" class="exercise-reps" value="${(ex.reps||'').replace(/"/g,'&quot;')}" placeholder="e.g. 8-12"></td>
+    <td><input type="text" class="exercise-notes" value="${(ex.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes"></td>
+    <td><button type="button" class="dyn-row-remove" onclick="this.closest('tr').remove()">&#10005;</button></td>
+  </tr>`;
+}
+function startExerciseRowDrag(e){
+  const row = e.target.closest('tr');
+  if(!row) return;
+  const container = row.closest('.exercise-rows');
+  if(!container) return;
+  startRowDrag(e, container, 'tr', ()=>{});
+}
+function renderTrainingSplitBlock(c, editable){
+  return `<div class="grid" style="grid-template-columns:1fr;gap:14px;" id="trainingSplitWrap">
+    ${c.trainingSplit.map((d,di)=>{
+      const exercises = normalizeExercises(d.exercises);
+      return `
+      <div class="card" data-day-idx="${di}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;">
+          ${inp('', d.label, editable, 'text', 'class="day-label" style="font-weight:700;font-size:14px;"').replace('id=""','')}
+        </div>
+        ${editable ? `
+        <div class="table-wrap"><table>
+          <tr><th></th><th>Exercise</th><th>Rep Range</th><th>Notes</th><th></th></tr>
+          <tbody class="exercise-rows">
+            ${exercises.map(ex=>exerciseRowHTML(ex)).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn-sm btn-ghost" type="button" style="margin-top:10px;" onclick="addExerciseRow(this)">+ Add Exercise</button>
+        ` : `
+        <div class="exercise-read-list">
+          ${exercises.length===0 ? `<div class="muted" style="font-size:12.5px;">No exercises added yet.</div>` : exercises.map(ex=>`
+          <div class="exercise-read-row">
+            <div class="exercise-read-name">${escapeHtml(ex.name||'')}</div>
+            <div class="exercise-read-meta">
+              ${ex.reps ? `<span class="exercise-read-reps">${escapeHtml(ex.reps)}</span>` : ''}
+              ${ex.notes ? `<span class="exercise-read-notes muted">${escapeHtml(ex.notes)}</span>` : ''}
+            </div>
+          </div>`).join('')}
+        </div>
+        `}
+      </div>`;
+    }).join('')}
+  </div>
+  ${editable?`<div style="margin-top:14px;display:flex;gap:10px;"><button class="btn-sm btn-ghost" type="button" onclick="addTrainingDay('${c.id}')">+ Add Training Day</button><button class="btn" onclick="saveTrainingSplit('${c.id}')">Save Training Split</button></div>`:''}`;
+}
+function addExerciseRow(btn){
+  const card = btn.closest('.card');
+  card.querySelector('.exercise-rows').insertAdjacentHTML('beforeend', exerciseRowHTML({}));
+}
+async function saveTrainingSplit(clientId){
+  const c=getClient(clientId);
+  const cards = document.querySelectorAll('#trainingSplitWrap .card');
+  const split=[];
+  cards.forEach(card=>{
+    const label = card.querySelector('.day-label').value;
+    const exercises = [];
+    card.querySelectorAll('.exercise-rows tr').forEach(row=>{
+      const name = row.querySelector('.exercise-name').value;
+      const reps = row.querySelector('.exercise-reps').value;
+      const notes = row.querySelector('.exercise-notes').value;
+      if(name.trim()!=='') exercises.push({name, reps, notes});
+    });
+    split.push({label, exercises});
+  });
+  const { error } = await sb.from('clients').update({ training_split: split }).eq('id', clientId);
+  if(error){ showToast('Could not save training split: '+error.message, true); return; }
+  c.trainingSplit = split; showToast('Training split saved');
+}
+function addTrainingDay(clientId){
+  const c = getClient(clientId);
+  c.trainingSplit.push({label:`Day ${c.trainingSplit.length+1}`, exercises:[]});
+  render();
+}
+
+/* ======================================================================
+   SCHEDULE
+   ====================================================================== */
+function renderScheduleBlock(c, editable){
+  return `
+  <div class="info-note">Let me know what your work schedule is and the times you think you will train and do cardio. From there I will adjust what I believe will be the best training split but this can always be adjusted as needed.</div>
+  <div class="table-wrap card" id="scheduleWrap">
+    <table>
+      <tr><th>Day</th><th>Work</th><th>Training Time</th><th>What Training</th><th>Cardio Time</th></tr>
+      ${c.schedule.map((s,i)=>`
+        <tr data-idx="${i}">
+          <td><b>${s.day}</b></td>
+          <td>${inp('', s.work, editable).replace('id=""','')}</td>
+          <td>${inp('', s.trainingTime, editable).replace('id=""','')}</td>
+          <td>${inp('', s.whatTraining, editable).replace('id=""','')}</td>
+          <td>${inp('', s.cardioTime, editable).replace('id=""','')}</td>
+        </tr>`).join('')}
+    </table>
+  </div>
+  ${editable?`<button class="btn" style="margin-top:14px;" onclick="saveSchedule('${c.id}')">Save Schedule</button>`:''}`;
+}
+async function saveSchedule(clientId){
+  const c=getClient(clientId);
+  const rows = document.querySelectorAll('#scheduleWrap tr[data-idx]');
+  const schedule = c.schedule.map(s=>({...s}));
+  rows.forEach(row=>{
+    const idx = parseInt(row.dataset.idx);
+    const inputs = row.querySelectorAll('input');
+    schedule[idx].work = inputs[0].value; schedule[idx].trainingTime = inputs[1].value;
+    schedule[idx].whatTraining = inputs[2].value; schedule[idx].cardioTime = inputs[3].value;
+  });
+  const { error } = await sb.from('clients').update({ schedule }).eq('id', clientId);
+  if(error){ showToast('Could not save schedule: '+error.message, true); return; }
+  c.schedule = schedule; showToast('Schedule saved');
+}
+
+/* ======================================================================
+   PED & SUPPLEMENTS TAB (reference view / history)
+   ====================================================================== */
+function pedTag(drugName){
+  const ref = PED_REFERENCE.find(p=>p.name===drugName);
+  const cat = ref ? ref.cat : 'Other';
+  const cls = 'tag-'+cat.toLowerCase();
+  return `<span class="compound-tag ${cls}">${cat.toUpperCase()}</span>`;
+}
+function renderPedSupplementsTab(c, isCoach){
+  const peds = c.pedLogs || [];
+  const supps = c.supplementLogs || [];
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>PED Cycle Log</h3>
+    ${!isCoach ? `<p class="muted" style="font-size:12.5px;margin-top:0;">Set by your coach — for your reference only.</p>` : ''}
+    ${peds.length===0 ? `<div class="empty">No compounds logged yet.</div>` : `
+    <div class="table-wrap"><table>
+      <tr>${isCoach&&peds.length>1?'<th></th>':''}<th>Compound</th><th>Dose</th><th>Frequency</th><th>Notes</th>${isCoach?'<th></th>':''}</tr>
+      <tbody class="ped-log-rows" data-client-id="${c.id}">
+      ${peds.map(p=>`<tr>${isCoach&&peds.length>1?`<td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startPedRowDrag(event,'${c.id}')" aria-label="Drag to reorder">&#10022;&#10022;</span></td>`:''}<td>${p.drug} ${pedTag(p.drug)}</td><td>${p.dose||''}</td><td>${p.frequency||''}</td><td style="color:var(--sub);max-width:200px;">${p.notes||''}</td>${isCoach?`<td><button class="btn-sm btn-ghost" style="color:var(--red);" onclick="removePedLog('${c.id}','${p.id}')">Remove</button></td>`:''}</tr>`).join('')}
+      </tbody>
+    </table></div>`}
+    ${isCoach ? `
+    <div class="row pedsupp-add-row" style="margin-top:12px;align-items:flex-end;">
+      <div class="field"><label>Compound</label><input list="pedList" id="pl_drug" placeholder="e.g. Testosterone Enanthate"></div>
+      <div class="field"><label>Dose</label><input id="pl_dose"></div>
+      <div class="field"><label>Frequency</label><input list="freqList" id="pl_freq"></div>
+      <div class="field"><label>Notes</label><input id="pl_notes"></div>
+      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addPedLog('${c.id}')">Add Entry</button></div>
+    </div>` : ''}
+    <div class="disclaimer">Logged for personal record-keeping and coach oversight only — not medical advice. Recommend regular bloodwork with a physician during any cycle.</div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Supplement Stack Log</h3>
+    ${!isCoach ? `<p class="muted" style="font-size:12.5px;margin-top:0;">Set by your coach — for your reference only.</p>` : ''}
+    ${supps.length===0 ? `<div class="empty">No supplements logged yet.</div>` : `
+    <div class="table-wrap"><table>
+      <tr>${isCoach&&supps.length>1?'<th></th>':''}<th>Supplement</th><th>Dose</th><th>Timing</th>${isCoach?'<th></th>':''}</tr>
+      <tbody class="supp-log-rows" data-client-id="${c.id}">
+      ${supps.map(s=>`<tr>${isCoach&&supps.length>1?`<td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startSuppRowDrag(event,'${c.id}')" aria-label="Drag to reorder">&#10022;&#10022;</span></td>`:''}<td>${s.drug}</td><td>${s.dose||''}</td><td>${s.timing||''}</td>${isCoach?`<td><button class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeSupplementLog('${c.id}','${s.id}')">Remove</button></td>`:''}</tr>`).join('')}
+      </tbody>
+    </table></div>`}
+    ${isCoach ? `
+    <div class="row pedsupp-add-row" style="margin-top:12px;align-items:flex-end;">
+      <div class="field"><label>Supplement</label><input list="suppList" id="sl_drug"></div>
+      <div class="field"><label>Dose</label><input id="sl_dose"></div>
+      <div class="field"><label>Timing</label><select id="sl_timing">${['Fasted','Meal 1','Any Meal','Pre Bed'].map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addSupplementLog('${c.id}')">Add Entry</button></div>
+    </div>` : ''}
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Notes</h3>
+    ${isCoach ? `
+    <textarea id="pedSuppNotesArea" rows="6" placeholder="Any notes for this client about their PEDs or supplements...">${c.pedSuppNotes||''}</textarea>
+    <div style="margin-top:10px;"><button class="btn btn-sm" onclick="savePedSuppNotes('${c.id}')">Save Notes</button></div>
+    ` : `
+    <p style="white-space:pre-wrap;line-height:1.6;font-size:13.5px;">${c.pedSuppNotes ? escapeHtml(c.pedSuppNotes) : 'No notes from your coach yet.'}</p>
+    `}
+  </div>`;
+}
+async function addPedLog(clientId){
+  const drug = document.getElementById('pl_drug').value.trim();
+  if(!drug){ showToast('Enter a compound name', true); return; }
+  const c = getClient(clientId);
+  const minOrder = (c.pedLogs && c.pedLogs.length) ? Math.min(...c.pedLogs.map(p=>p.sort_order||0)) : 1;
+  const row = { client_id: clientId, date: new Date().toISOString().slice(0,10), drug,
+    dose: document.getElementById('pl_dose').value, frequency: document.getElementById('pl_freq').value,
+    notes: document.getElementById('pl_notes').value, sort_order: minOrder - 1 };
+  const { data, error } = await sb.from('ped_logs').insert(row).select().single();
+  if(error){ showToast('Could not add entry: '+error.message, true); return; }
+  c.pedLogs = c.pedLogs || []; c.pedLogs.unshift(data);
+  render(); showToast('Compound logged');
+}
+async function removePedLog(clientId, id){
+  const { error } = await sb.from('ped_logs').delete().eq('id', id);
+  if(error){ showToast('Could not remove: '+error.message, true); return; }
+  const c = getClient(clientId); c.pedLogs = (c.pedLogs||[]).filter(p=>p.id!==id);
+  render();
+}
+function startPedRowDrag(e, clientId){
+  const row = e.target.closest('tr');
+  if(!row) return;
+  const container = row.closest('.ped-log-rows');
+  if(!container) return;
+  startRowDrag(e, container, 'tr', (from,to)=>reorderPedLog(clientId, from, to));
+}
+async function reorderPedLog(clientId, fromIdx, toIdx){
+  const c = getClient(clientId);
+  const list = c.pedLogs;
+  const [moved] = list.splice(fromIdx,1);
+  list.splice(toIdx,0,moved);
+  list.forEach((p,i)=>{ p.sort_order = i; });
+  const results = await Promise.all(list.map(p=>sb.from('ped_logs').update({sort_order:p.sort_order}).eq('id',p.id)));
+  const errored = results.find(r=>r.error);
+  if(errored){ showToast('Could not save new order: '+errored.error.message, true); }
+  render();
+}
+async function addSupplementLog(clientId){
+  const drug = document.getElementById('sl_drug').value.trim();
+  if(!drug){ showToast('Enter a supplement name', true); return; }
+  const c = getClient(clientId);
+  const minOrder = (c.supplementLogs && c.supplementLogs.length) ? Math.min(...c.supplementLogs.map(s=>s.sort_order||0)) : 1;
+  const row = { client_id: clientId, date: new Date().toISOString().slice(0,10),
+    timing: document.getElementById('sl_timing').value, drug, dose: document.getElementById('sl_dose').value, sort_order: minOrder - 1 };
+  const { data, error } = await sb.from('supplement_logs').insert(row).select().single();
+  if(error){ showToast('Could not add entry: '+error.message, true); return; }
+  c.supplementLogs = c.supplementLogs || []; c.supplementLogs.unshift(data);
+  render(); showToast('Supplement logged');
+}
+async function removeSupplementLog(clientId, id){
+  const { error } = await sb.from('supplement_logs').delete().eq('id', id);
+  if(error){ showToast('Could not remove: '+error.message, true); return; }
+  const c = getClient(clientId); c.supplementLogs = (c.supplementLogs||[]).filter(s=>s.id!==id);
+  render();
+}
+function startSuppRowDrag(e, clientId){
+  const row = e.target.closest('tr');
+  if(!row) return;
+  const container = row.closest('.supp-log-rows');
+  if(!container) return;
+  startRowDrag(e, container, 'tr', (from,to)=>reorderSupplementLog(clientId, from, to));
+}
+async function reorderSupplementLog(clientId, fromIdx, toIdx){
+  const c = getClient(clientId);
+  const list = c.supplementLogs;
+  const [moved] = list.splice(fromIdx,1);
+  list.splice(toIdx,0,moved);
+  list.forEach((s,i)=>{ s.sort_order = i; });
+  const results = await Promise.all(list.map(s=>sb.from('supplement_logs').update({sort_order:s.sort_order}).eq('id',s.id)));
+  const errored = results.find(r=>r.error);
+  if(errored){ showToast('Could not save new order: '+errored.error.message, true); }
+  render();
+}
+async function savePedSuppNotes(clientId){
+  const notes = document.getElementById('pedSuppNotesArea').value;
+  const { error } = await sb.from('clients').update({ pedsupp_notes: notes }).eq('id', clientId);
+  if(error){ showToast('Could not save notes: '+error.message, true); return; }
+  getClient(clientId).pedSuppNotes = notes;
+  showToast('Notes saved');
+}
+
+/* ======================================================================
+   TEST RESULTS (bloodwork / DEXA / scans)
+   ====================================================================== */
+function renderTestResultsBlock(c, canUpload){
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin-bottom:10px;">Uploaded Results</h3>
+    ${c.testResults.length===0 ? `<div class="empty">No test results uploaded yet.</div>` :
+      c.testResults.slice().reverse().map(t=>`
+      <div class="filecard">
+        <div class="filecard-left">
+          <b>${t.label}</b> <span class="badge badge-blue">${t.type}</span>
+          <div>${t.date} ${t.fileName?('· '+t.fileName):''}</div>
+          ${t.notes?`<div>${t.notes}</div>`:''}
+        </div>
+        <div style="display:flex;gap:8px;">
+          ${t.fileDataUrl ? `<a class="btn btn-sm btn-ghost" href="${t.fileDataUrl}" download="${t.fileName}">View / Download</a>` : `<span class="muted" style="font-size:12px;">No file attached</span>`}
+          <button class="btn-sm btn-ghost" style="color:var(--red);" onclick="deleteTestResult('${c.id}','${t.id}')">Delete</button>
+        </div>
+      </div>`).join('')}
+  </div>
+  ${canUpload?`
+  <div class="card">
+    <h3>Add New Result</h3>
+    <div class="row">
+      <div class="field"><label>Date</label><input type="date" id="tr_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>Type</label><select id="tr_type">${TEST_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="field"><label>Label</label><input type="text" id="tr_label" placeholder="e.g. Week 6 Bloodwork Panel"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="tr_notes" placeholder="Key takeaways, flagged markers, etc."></textarea></div>
+    <div class="field"><label>File (PDF or image)</label><input type="file" id="tr_file" accept="application/pdf,image/*"></div>
+    <button class="btn btn-sm" id="tr_submit_btn" onclick="addTestResult('${c.id}')">Add Result</button>
+  </div>`:''}`;
+}
+async function addTestResult(clientId){
+  const c=getClient(clientId);
+  const date=document.getElementById('tr_date').value || new Date().toISOString().slice(0,10);
+  const type=document.getElementById('tr_type').value;
+  const label=document.getElementById('tr_label').value || type;
+  const notes=document.getElementById('tr_notes').value;
+  const fileInput=document.getElementById('tr_file');
+  const file = fileInput.files[0];
+  const btn = document.getElementById('tr_submit_btn');
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  let filePath = null, fileName = null;
+  if(file){
+    filePath = `${clientId}/${uid()}-${file.name}`;
+    const { error: upErr } = await sb.storage.from('test-results').upload(filePath, file);
+    if(upErr){ showToast('Upload failed: '+upErr.message, true); btn.disabled=false; btn.textContent='Add Result'; return; }
+    fileName = file.name;
+  }
+  const { data, error } = await sb.from('test_results').insert({
+    client_id: clientId, date, type, label, notes, file_path: filePath, file_name: fileName
+  }).select().single();
+  if(error){ showToast('Could not save result: '+error.message, true); btn.disabled=false; btn.textContent='Add Result'; return; }
+  const fileDataUrl = await resolveSignedUrl('test-results', filePath);
+  c.testResults.push({ id:data.id, date, type, label, notes, fileName, fileDataUrl, filePath });
+  render();
+  showToast('Test result added');
+}
+async function deleteTestResult(clientId, resultId){
+  const c=getClient(clientId);
+  const item = c.testResults.find(t=>t.id===resultId);
+  const { error } = await sb.from('test_results').delete().eq('id', resultId);
+  if(error){ showToast('Could not remove result: '+error.message, true); return; }
+  if(item && item.filePath){ await sb.storage.from('test-results').remove([item.filePath]); }
+  c.testResults = c.testResults.filter(t=>t.id!==resultId);
+  render(); showToast('Test result removed');
+}
+
+/* ======================================================================
+   CLIENT: OWN DASHBOARD
+   ====================================================================== */
+function renderDailyTrackerCard(c){
+  return `
+  <div class="card qform-card" style="margin-bottom:16px;">
+    <h3 style="margin-bottom:2px;">Daily Tracker</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Log this as you go through the week for your own reference.</p>
+    ${renderDailyTable(c.dailyDraft||[], true)}
+    <button class="btn btn-sm" style="margin-top:12px;" onclick="saveDailyTracker('${c.id}')">Save Daily Tracker</button>
+  </div>`;
+}
+function renderClientInfoReadCard(c){
+  const days = (c.checkinDays && c.checkinDays.length) ? c.checkinDays : [c.checkinDay||'Monday'];
+  const daysLabel = days.map(d=>d.slice(0,3)).join(', ');
+  return `
+  <div class="card" style="margin-bottom:16px;"><h3>Your Info</h3>
+    <div class="muted" style="font-size:12.5px;line-height:1.9;">
+      Name: <span style="color:var(--text);">${escapeHtml(c.name||'')}</span><br>
+      Goal: <span style="color:var(--text);">${escapeHtml(c.goal||'—')}</span><br>
+      Check-in day(s): <span style="color:var(--text);">${escapeHtml(daysLabel)}</span>
+    </div>
+  </div>`;
+}
+function renderClientOwnDashboard(c){
+  const lc=latestCheckin(c);
+  const days = (c.checkinDays && c.checkinDays.length) ? c.checkinDays : [c.checkinDay||'Monday'];
+  const daysLabel = days.map(d=>d.slice(0,3)).join(', ');
+  if(!lc){
+    return `<div class="card" style="margin-bottom:16px;"><div class="empty">You haven't submitted a check-in yet — head to PBP Check-In in the sidebar to get started.</div></div>
+    ${renderDailyTrackerCard(c)}
+    ${renderClientInfoReadCard(c)}`;
+  }
+  const delta=weightChange(c);
+  const weighed = weighedCheckins(c);
+  const startWeight = weighed.length ? weighed[0].weight : null;
+  return `
+  <div class="grid cards-4" style="margin-bottom:16px;">
+    <div class="card"><div class="stat-label">Starting Weight</div><div class="stat-value">${startWeight!=null?startWeight:'—'} kg</div></div>
+    <div class="card"><div class="stat-label">Current Weight</div><div class="stat-value">${hasWeight(lc)?lc.weight:'—'} kg</div><div class="stat-delta ${delta<0?'delta-pos':'delta-neg'}">${delta>0?'+':''}${delta} kg total</div></div>
+    <div class="card"><div class="stat-label">Overall Adherence Last Week</div><div class="stat-value">${(lc.overallAdherence||0).toFixed(1)}/5</div></div>
+    <div class="card"><div class="stat-label">Next Check-In Due</div><div class="stat-value" style="font-size:18px;">${escapeHtml(daysLabel)}</div></div>
+  </div>
+  ${renderDailyTrackerCard(c)}
+  <div class="card" style="margin-bottom:16px;"><h3>Weight Trend</h3><div class="chart-wrap"><canvas id="weightChart"></canvas></div></div>
+  ${renderClientInfoReadCard(c)}`;
+}
+async function saveDailyTracker(clientId){
+  const days = collectDailyTable();
+  const { error } = await sb.from('daily_drafts').upsert({ client_id: clientId, days, updated_at: new Date().toISOString() });
+  if(error){ showToast('Could not save daily tracker: '+error.message, true); return; }
+  getClient(clientId).dailyDraft = days;
+  showToast('Daily tracker saved');
+}
+
+/* ======================================================================
+   CLIENT: PBP CHECK-IN FORM (the one, main weekly check-in)
+   ====================================================================== */
+function ratingRow(id, question, leftLabel, rightLabel, def, max){
+  max = max || 5;
+  def = def || Math.ceil(max/2);
+  const buttons = Array.from({length:max}, (_,i)=>i+1).map(n=>
+    `<button type="button" class="rating-btn${n===def?' active':''}" onclick="selectRating('${id}',${n},this)">${n}</button>`).join('');
+  return `<div class="field">
+    <label style="text-transform:none;font-size:13px;color:var(--text);font-weight:600;">${question}</label>
+    <div class="rating-row">
+      ${leftLabel?`<span class="slider-endlabel">${leftLabel}</span>`:''}
+      <div class="rating-btn-group">${buttons}</div>
+      ${rightLabel?`<span class="slider-endlabel right">${rightLabel}</span>`:''}
+    </div>
+    <input type="hidden" id="${id}" value="${def}">
+  </div>`;
+}
+function selectRating(id, val, btn){
+  document.getElementById(id).value = val;
+  btn.parentElement.querySelectorAll('.rating-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function textQ(id, question, placeholder){
+  return `<div class="field"><label style="text-transform:none;font-size:13px;color:var(--text);font-weight:600;">${question}</label><input type="text" id="${id}" placeholder="${placeholder||''}"></div>`;
+}
+function areaQ(id, question, placeholder){
+  return `<div class="field"><label style="text-transform:none;font-size:13px;color:var(--text);font-weight:600;">${question}</label><textarea id="${id}" placeholder="${placeholder||''}"></textarea></div>`;
+}
+function selectQ(id, question, options){
+  return `<div class="field"><label style="text-transform:none;font-size:13px;color:var(--text);font-weight:600;">${question}</label><select id="${id}">${options.map(o=>`<option>${o}</option>`).join('')}</select></div>`;
+}
+
+function renderWeeklyCheckinForm(c){
+  return `
+  <div class="card qform-card">
+    <h3 style="margin-bottom:2px;">PBP Checkin — Week ${c.checkins.length+1}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Please submit your answers below to complete your check in.</p>
+    <div class="field" style="max-width:220px;"><label>Check-In Date</label><div id="pbp_date" style="padding:9px 0;font-size:13.5px;color:var(--text);">${new Date().toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'})}</div></div>
+  </div>
+
+  <div class="card qform-card">
+    ${textQ('pbp_weight','Weight (kg)')}
+    ${textQ('pbp_bloodPressure','Fasted Blood Pressure (check 15 mins after 1L of water — use left arm always)')}
+    ${textQ('pbp_bloodGlucose','Fasted Blood Glucose (check 15 mins after 1L of water)')}
+  </div>
+
+  <div class="card qform-card">
+    ${textQ('pbp_sleepHours','How many hours of sleep are you getting on average?')}
+    ${ratingRow('pbp_sleepRating','How would you rate your sleep?','Really bad','Amazing',3)}
+  </div>
+
+  <div class="card qform-card">
+    ${selectQ('pbp_nutritionFollowed','Did you follow your nutrition plan 100%?',['Yes','No'])}
+    ${areaQ('pbp_nutritionDetails','If "No" please provide details about anything you did differently')}
+  </div>
+
+  <div class="card qform-card">
+    ${ratingRow('pbp_hunger','Hunger levels','Extremely Full','Starving',3)}
+    ${areaQ('pbp_digestionFeedback','Do you have any feedback or concerns regarding digestion? (i.e. bloating, cramping, loose stools, constipation, reflux, burping, etc...)')}
+    ${selectQ('pbp_bowelFrequency','Bowel movement frequency',['Less than 1x per day','1x per day','More than 1x per day','More than 3x per day'])}
+    ${textQ('pbp_waterIntake','Average water intake')}
+  </div>
+
+  <div class="card qform-card">
+    ${selectQ('pbp_trainingCompleted','Did you complete your training sessions 100%?',['Yes','No','N/A'])}
+    ${textQ('pbp_trainingDetails','If "No", what was done according to plan?')}
+    ${ratingRow('pbp_trainingIntensity','How would you rate your intensity during training?','','',3)}
+    ${areaQ('pbp_trainingConcerns','Any concerns with training or are you getting stronger? (i.e. losing strength, not feeling motivated, etc...)')}
+    ${ratingRow('pbp_recoveryRating','How would you rate your recovery from session to session?','Everything hurts','Amazing',3)}
+  </div>
+
+  <div class="card qform-card">
+    ${selectQ('pbp_cardioCompleted','Was all your cardio completed 100%?',['Yes','No','N/A'])}
+    ${textQ('pbp_avgHeartRate','What was your average heart rate during cardio?')}
+    ${ratingRow('pbp_stressRating','How would you rate your stress levels this week?','Chill as a cucumber','Super Stressed',3)}
+    ${textQ('pbp_stressors','Do you have any added stressors this week?')}
+    ${ratingRow('pbp_overallAdherence','How would you rate your overall adherence to your goals this week?','','',3)}
+  </div>
+
+  <div class="card qform-card">
+    <h3 style="margin-bottom:2px;">Progress Photos</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Tap + to add one or more photos per angle.</p>
+    <div class="row" style="gap:24px;">
+      ${uploadBox('front','Front')} ${uploadBox('side','Side')} ${uploadBox('back','Back')}
+    </div>
+  </div>
+
+  <div class="card qform-card">
+    ${areaQ('pbp_clientNotes','Is there any way I can be of better help to you? Do you need more assistance in anything?')}
+  </div>
+
+  <button class="btn" id="checkinSubmitBtn" onclick="submitWeeklyCheckin('${c.id}')">Submit Check-In</button>
+  `;
+}
+let checkinPhotoDrafts = {front:[],side:[],back:[]};
+function uploadBox(key,label){
+  return `<div class="photo-upload-group">
+    <div class="muted" style="font-size:12.5px;font-weight:600;">${label}</div>
+    <div class="photo-thumbs" id="thumbs_${key}">${(checkinPhotoDrafts[key]||[]).map((url,i)=>photoThumbHTML(key,url,i)).join('')}</div>
+    <label class="photo-add-btn" for="file_${key}">+</label>
+    <input type="file" accept="image/*" multiple id="file_${key}" style="display:none" onchange="handlePhotoUpload('${key}')">
+  </div>`;
+}
+function photoThumbHTML(key, url, i){
+  return `<div class="photo-thumb" style="background-image:url(${url})"><span class="rm" onclick="removeCheckinPhoto('${key}',${i})">&#10005;</span></div>`;
+}
+function handlePhotoUpload(key){
+  const input=document.getElementById('file_'+key);
+  const files = Array.from(input.files||[]);
+  files.forEach(file=>{
+    resizeImage(file, 900, 0.75, dataUrl=>{
+      checkinPhotoDrafts[key].push(dataUrl);
+      const wrap = document.getElementById('thumbs_'+key);
+      if(wrap) wrap.innerHTML = checkinPhotoDrafts[key].map((url,i)=>photoThumbHTML(key,url,i)).join('');
+    });
+  });
+  input.value = '';
+}
+function removeCheckinPhoto(key, idx){
+  checkinPhotoDrafts[key].splice(idx,1);
+  const wrap = document.getElementById('thumbs_'+key);
+  if(wrap) wrap.innerHTML = checkinPhotoDrafts[key].map((url,i)=>photoThumbHTML(key,url,i)).join('');
+}
+function resizeImage(file, maxDim, quality, cb){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width, h=img.height;
+      if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; } else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+      const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+      cb(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror=()=>cb(e.target.result);
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+const CHECKIN_TEXT_FIELDS = ['bloodPressure','bloodGlucose','sleepHours','nutritionDetails','digestionFeedback','waterIntake','trainingDetails','trainingConcerns','avgHeartRate','stressors','clientNotes'];
+const CHECKIN_SELECT_FIELDS = ['nutritionFollowed','bowelFrequency','trainingCompleted','cardioCompleted'];
+const CHECKIN_RATING_FIELDS = ['sleepRating','hunger','trainingIntensity','recoveryRating','stressRating','overallAdherence'];
+
+async function uploadPhotosForAngle(clientId, week, angle){
+  const urls = checkinPhotoDrafts[angle] || [];
+  const paths = [];
+  for(let i=0;i<urls.length;i++){
+    const blob = await (await fetch(urls[i])).blob();
+    const path = `${clientId}/week${week}-${angle}-${uid()}.jpg`;
+    const { error } = await sb.storage.from('progress-photos').upload(path, blob, { contentType:'image/jpeg' });
+    if(error){ showToast(`Could not upload a ${angle} photo: ${error.message}`, true); continue; }
+    paths.push(path);
+  }
+  return paths;
+}
+
+async function submitWeeklyCheckin(clientId){
+  const c=getClient(clientId);
+  const days = c.dailyDraft || [];
+  const weightVal = document.getElementById('pbp_weight').value;
+  if(!weightVal){ showToast('Please enter your weight to submit your check-in', true); return; }
+
+  const submitBtn = document.getElementById('checkinSubmitBtn');
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Submitting…'; }
+
+  const week = c.checkins.length+1;
+  const date = new Date().toISOString().slice(0,10);
+
+  const [frontPaths, sidePaths, backPaths] = await Promise.all([
+    uploadPhotosForAngle(clientId, week, 'front'),
+    uploadPhotosForAngle(clientId, week, 'side'),
+    uploadPhotosForAngle(clientId, week, 'back')
+  ]);
+
+  const payload = {
+    days,
+    weight: parseFloat(weightVal) || 0,
+    photos: { front:frontPaths, side:sidePaths, back:backPaths },
+    coachFeedback: 'Awaiting coach review'
+  };
+  CHECKIN_TEXT_FIELDS.concat(CHECKIN_SELECT_FIELDS).forEach(k=>{ payload[k] = document.getElementById('pbp_'+k).value; });
+  CHECKIN_RATING_FIELDS.forEach(k=>{ payload[k] = parseInt(document.getElementById('pbp_'+k).value); });
+
+  const { data, error } = await sb.from('checkins').insert({ client_id: clientId, week, date, payload }).select().single();
+  if(error){
+    showToast('Could not submit check-in: '+error.message, true);
+    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Check-In'; }
+    return;
+  }
+
+  const newCheckin = { id:data.id, week, date, ...payload };
+  newCheckin.photos = {
+    front: await Promise.all(frontPaths.map(p=>resolveSignedUrl('progress-photos', p))),
+    side: await Promise.all(sidePaths.map(p=>resolveSignedUrl('progress-photos', p))),
+    back: await Promise.all(backPaths.map(p=>resolveSignedUrl('progress-photos', p)))
+  };
+  c.checkins.push(newCheckin);
+
+  // Clear the drafts now that they've been submitted, ready for next week.
+  checkinPhotoDrafts = {front:[],side:[],back:[]};
+  await sb.from('daily_drafts').delete().eq('client_id', clientId);
+  c.dailyDraft = [];
+
+  showToast('Check-in submitted to your coach!');
+  state.page='client-history';
+  render();
+}
+
+/* ======================================================================
+   INIT
+   ====================================================================== */
+initAuth();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
