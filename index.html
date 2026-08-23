@@ -160,6 +160,10 @@
   .meal-instructions-read .meal-instructions-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);font-weight:700;margin-bottom:4px;}
   .meal-instructions-read p{margin:0;font-size:13px;line-height:1.5;white-space:pre-wrap;}
   .food-edit-row{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--bg);}
+  .pedsupp-add-panel{border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:14px;background:var(--bg);}
+  .pedsupp-add-title{font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:12px;}
+  .pedsupp-add-row{margin-bottom:2px;}
+  .pedsupp-add-row .field{margin-bottom:12px;}
   .food-edit-top{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
   .food-edit-top .food-name{flex:1;}
   .food-edit-top .dyn-row-remove{width:34px;flex-shrink:0;}
@@ -299,7 +303,7 @@
    ====================================================================== */
 const STORAGE_KEY = 'peakcheck_v1';
 
-const DAILY_FIELDS = [
+let DAILY_FIELDS = [
   {k:'weight', l:'Weight (kg)', t:'number', step:'0.1'},
   {k:'water', l:'Water (L)', t:'number', step:'0.1'},
   {k:'sleepHrs', l:'Sleep (hrs)', t:'number', step:'0.1'},
@@ -315,7 +319,8 @@ const DAILY_FIELDS = [
   {k:'soreness', l:'Soreness 1-5', t:'number', min:1, max:5},
   {k:'posing', l:'Posing', t:'select', opts:['No','Yes']},
   {k:'extras', l:'EXTRAS (E.G. SAUNA, MASSAGE, COLD THERAPY, ETC...)', t:'text'}
-];
+]; // fallback used until fetchFormConfig() loads the coach-editable version from Supabase
+let CHECKIN_QUESTIONS = [];
 const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 /* Starter reference lists — pulled from the coach's original check-in sheet.
@@ -621,6 +626,14 @@ let clients = [];
 let state = { role:null, currentClientId:null, page:'dashboard', detailTab:'overview', clientListTab:'active' };
 let session = null;
 let myProfile = null;
+let myOrg = null;
+let coachOrgs = [];
+function applyOrgBranding(org){
+  if(!org) return;
+  const root = document.documentElement;
+  if(org.accent) root.style.setProperty('--accent', org.accent);
+  if(org.accent2) root.style.setProperty('--accent2', org.accent2);
+}
 
 function getClient(id){ return clients.find(c=>c.id===id); }
 function showToast(msg, warn){
@@ -704,9 +717,20 @@ async function fetchReferenceData(){
   PED_REFERENCE = (data||[]).filter(r=>r.kind==='ped').map(r=>({ id:r.id, name:r.name, cat:r.category }));
   SUPPLEMENT_REFERENCE = (data||[]).filter(r=>r.kind==='supplement').map(r=>({ id:r.id, name:r.name, cat:r.category }));
 }
+async function fetchFormConfig(){
+  const { data: qrows, error: qerr } = await sb.from('checkin_questions').select('*').order('sort_order');
+  if(qerr){ console.error(qerr); } else {
+    CHECKIN_QUESTIONS = (qrows||[]).map(r=>({ id:r.id, key:r.key, label:r.label, type:r.type, options:r.options||[], placeholder:r.placeholder||'' }));
+  }
+  const { data: drows, error: derr } = await sb.from('daily_tracker_fields').select('*').order('sort_order');
+  if(derr){ console.error(derr); } else {
+    DAILY_FIELDS = (drows||[]).map(r=>({ id:r.id, k:r.key, l:r.label, t:r.type, opts:r.options||[], min:r.min===null?undefined:r.min, max:r.max===null?undefined:r.max, step:r.step===null?undefined:r.step }));
+  }
+}
 
 async function loadAppData(){
   await fetchReferenceData();
+  await fetchFormConfig();
   if(state.role==='coach'){
     const { data: crows, error } = await sb.from('clients').select('id').order('created_at');
     if(error) throw error;
@@ -743,6 +767,10 @@ async function loadProfileAndApp(){
   state.role = prow.role;
   state.page = prow.role==='coach' ? 'dashboard' : 'client-dashboard';
   document.getElementById('app').innerHTML = `<div class="loading-screen">Loading your data…</div>`;
+  if(prow.org_id){
+    const { data: orgRow } = await sb.from('orgs').select('*').eq('id', prow.org_id).single();
+    if(orgRow){ myOrg = orgRow; applyOrgBranding(orgRow); }
+  }
   try{
     await loadAppData();
   }catch(e){
@@ -786,7 +814,9 @@ async function handleSignUp(){
 }
 async function handleSignOut(){
   await sb.auth.signOut();
-  session=null; myProfile=null; clients=[];
+  session=null; myProfile=null; myOrg=null; clients=[]; coachOrgs=[];
+  document.documentElement.style.removeProperty('--accent');
+  document.documentElement.style.removeProperty('--accent2');
   state = { role:null, currentClientId:null, page:'dashboard', detailTab:'overview' };
   renderAuthScreen();
 }
@@ -799,10 +829,9 @@ function renderAuthScreen(infoMsg){
       ${infoMsg?`<div class="auth-info">${infoMsg}</div>`:''}
       <div class="field"><label>Email</label><input type="text" id="auth_email"></div>
       <div class="field"><label>Password</label><input type="password" id="auth_password" placeholder="6+ characters"></div>
-      <div class="muted" style="font-size:11.5px;margin:2px 0 14px;">Clients: use the invite link your coach emailed you instead of signing up here.</div>
+      <div class="muted" style="font-size:11.5px;margin:2px 0 14px;">Clients and coaches: use the invite link emailed to you instead of signing up here.</div>
       <div class="row">
         <button class="btn" style="flex:1;" onclick="handleSignIn()">Sign In</button>
-        <button class="btn btn-ghost" style="flex:1;" onclick="handleSignUp()">Create Coach Account</button>
       </div>
     </div>
   </div>`;
@@ -817,7 +846,7 @@ async function handleAcceptInvite(){
   if(pw!==pw2){ errEl.textContent='Passwords do not match.'; errEl.style.display='block'; return; }
   const { error: upErr } = await sb.auth.updateUser({ password: pw });
   if(upErr){ errEl.textContent = upErr.message; errEl.style.display='block'; return; }
-  const profileRow = { id: session.user.id, email: session.user.email, role: meta.role||'client', client_id: meta.client_id||null };
+  const profileRow = { id: session.user.id, email: session.user.email, role: meta.role||'client', client_id: meta.client_id||null, org_id: meta.org_id||null };
   const { error: perr } = await sb.from('profiles').insert(profileRow);
   if(perr){ errEl.textContent = 'Could not finish setup: '+perr.message; errEl.style.display='block'; return; }
   await loadProfileAndApp();
@@ -920,7 +949,8 @@ function selectClient(id){ state.currentClientId=id; if(state.role==='coach') st
    SIDEBAR / TOPBAR
    ====================================================================== */
 function renderSidebar(){
-  const coachLinks = [ ['dashboard','&#9638;','Dashboard'], ['clients','&#9776;','All Clients'], ['fooddb','&#127859;','Food Database'], ['peddb','&#8853;','PED Database'], ['suppdb','&#128138;','Supplement Database'] ];
+  const coachLinks = [ ['dashboard','&#9638;','Dashboard'], ['clients','&#9776;','All Clients'], ['fooddb','&#127859;','Food Database'], ['peddb','&#8853;','PED Database'], ['suppdb','&#128138;','Supplement Database'], ['checkinform','&#128203;','Check-In Form'], ['dailyfields','&#128202;','Daily Tracker Fields'] ];
+  if(myProfile && myProfile.is_owner) coachLinks.push(['coaches','&#128101;','Coaches']);
   const clientLinks = [
     ['client-dashboard','&#9638;','My Dashboard'], ['client-checkin','&#128203;','PBP Check-In'],
     ['client-history','&#128337;','Check-In History'], ['client-photos','&#9638;','Progress Photos'],
@@ -930,7 +960,7 @@ function renderSidebar(){
   ];
   const links = state.role==='coach' ? coachLinks : clientLinks;
   const linkHtml = links.map(([p,icon,label])=>`
-    <div class="navlink ${state.page===p?'active':''}" onclick="setPage('${p}')"><span class="nav-icon">${icon}</span>${label}</div>`).join('');
+    <div class="navlink ${state.page===p?'active':''}" onclick="${p==='coaches'?'goToCoachesPage()':`setPage('${p}')`}"><span class="nav-icon">${icon}</span>${label}</div>`).join('');
 
   let detailNav='';
   if(state.role==='coach' && state.page==='client-detail'){
@@ -963,6 +993,9 @@ function renderTopbar(){
     else if(state.page==='fooddb'){ title='Food Database'; sub='Shared reference used across meal plans'; }
     else if(state.page==='peddb'){ title='PED Database'; sub='Shared compound reference used across client PED logs'; }
     else if(state.page==='suppdb'){ title='Supplement Database'; sub='Shared reference used across client supplement stacks'; }
+    else if(state.page==='checkinform'){ title='Check-In Form'; sub='Shared question list used on every client\'s weekly check-in'; }
+    else if(state.page==='dailyfields'){ title='Daily Tracker Fields'; sub='Shared column set used in every client\'s daily tracker'; }
+    else if(state.page==='coaches'){ title='Coaches'; sub='Coach accounts on this platform'; }
     else if(state.page==='client-detail'){ const c=getClient(state.currentClientId); title=c?c.name:''; sub=c?c.goal:''; }
   } else {
     const c=getClient(state.currentClientId);
@@ -999,6 +1032,9 @@ function renderPage(){
     if(state.page==='fooddb') return renderFoodDbPage(true);
     if(state.page==='peddb') return renderPedDbPage(true);
     if(state.page==='suppdb') return renderSupplementDbPage(true);
+    if(state.page==='checkinform') return renderCheckinFormPage();
+    if(state.page==='dailyfields') return renderDailyFieldsPage();
+    if(state.page==='coaches') return myProfile && myProfile.is_owner ? renderCoachesPage() : renderCoachDashboard();
     if(state.page==='client-detail') return clients.length ? renderClientDetail() : `<div class="empty">No clients yet — add one from All Clients.</div>`;
     return renderCoachDashboard();
   } else {
@@ -1249,7 +1285,8 @@ async function createClient(){
     checkin_day: checkinDay, checkin_days: [checkinDay],
     meal_plan: defaultMealPlan(),
     schedule: defaultSchedule(),
-    training_split: [{ label:'Day 1', exercises:[] }]
+    training_split: [{ label:'Day 1', exercises:[] }],
+    org_id: myProfile ? myProfile.org_id : null
   }).select().single();
   if(error){ showToast('Could not create client: '+error.message, true); return; }
   const client = rowToClient(data);
@@ -1257,6 +1294,95 @@ async function createClient(){
   state.currentClientId = client.id;
   render();
   showToast(`${name} was created — send them an invite from their client card.`);
+}
+
+/* ======================================================================
+   OWNER: COACHES PAGE (create + brand new coach accounts)
+   ====================================================================== */
+async function goToCoachesPage(){
+  state.page = 'coaches';
+  render();
+  await loadCoachOrgs();
+  render();
+}
+async function loadCoachOrgs(){
+  const { data: orgs, error } = await sb.from('orgs').select('*').order('created_at');
+  if(error){ showToast('Could not load coaches: '+error.message, true); return; }
+  const { data: profs } = await sb.from('profiles').select('id,email,org_id,is_owner').eq('role','coach');
+  coachOrgs = (orgs||[]).map(o=>{
+    const prof = (profs||[]).find(p=>p.org_id===o.id);
+    return { ...o, coachEmail: prof?prof.email:null, hasAccount: !!prof, isOwnerOrg: !!(prof&&prof.is_owner) };
+  });
+}
+function renderCoachesPage(){
+  return `
+  <div style="margin-bottom:16px;"><button class="btn btn-sm" onclick="openAddCoachForm()">+ Add Coach</button></div>
+  <div id="addCoachFormWrap"></div>
+  ${coachOrgs.length===0 ? `<div class="card"><div class="empty">No coaches yet.</div></div>` : `<div class="grid cards-3">${coachOrgs.map(o=>renderCoachOrgCard(o)).join('')}</div>`}`;
+}
+function renderCoachOrgCard(o){
+  const initials = (o.name||'??').trim().split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+  return `
+  <div class="client-card" style="cursor:default;">
+    <div class="client-card-top">
+      <div class="avatar" style="background:${o.accent}">${initials}</div>
+      <div style="flex:1;min-width:0;"><div class="client-card-name">${escapeHtml(o.name)}${o.isOwnerOrg?` <span class="badge" style="background:rgba(154,161,180,.15);color:var(--sub);">You</span>`:''}</div></div>
+    </div>
+    <div class="mini-row"><span>Colors</span><span><span style="display:inline-block;width:14px;height:14px;border-radius:4px;background:${o.accent};margin-right:4px;vertical-align:-2px;"></span><span style="display:inline-block;width:14px;height:14px;border-radius:4px;background:${o.accent2};vertical-align:-2px;"></span></span></div>
+    ${coachAccountStatusRow(o)}
+  </div>`;
+}
+function coachAccountStatusRow(o){
+  if(o.hasAccount) return `<div class="mini-row"><span>Account</span><span class="badge badge-green">Active</span></div>`;
+  if(o.invited_email) return `<div class="mini-row"><span>Invited</span><span style="font-size:11px;text-align:right;">${escapeHtml(o.invited_email)}</span></div>`;
+  return `<div class="mini-row"><span>Account</span><span class="badge badge-amber">Not invited</span></div>`;
+}
+function openAddCoachForm(){
+  document.getElementById('addCoachFormWrap').innerHTML = `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Add Coach</h3>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field"><label>Business / Coach Name</label><input type="text" id="ac_name" placeholder="e.g. Sarah's Coaching"></div>
+      <div class="field"><label>Email</label><input type="email" id="ac_email" placeholder="coach@example.com"></div>
+      <div class="field" style="flex:0 0 auto;"><label>Accent Color</label><input type="color" id="ac_accent" value="#ff5c35"></div>
+      <div class="field" style="flex:0 0 auto;"><label>Accent 2</label><input type="color" id="ac_accent2" value="#ffb238"></div>
+    </div>
+    <div class="auth-error" id="ac_error" style="display:none;"></div>
+    <div class="row">
+      <button type="button" class="btn btn-sm" id="ac_send_btn" onclick="sendCoachInvite()">Send Invite</button>
+      <button type="button" class="btn-sm btn-ghost" onclick="document.getElementById('addCoachFormWrap').innerHTML=''">Cancel</button>
+    </div>
+  </div>`;
+}
+async function sendCoachInvite(){
+  const name = document.getElementById('ac_name').value.trim();
+  const email = document.getElementById('ac_email').value.trim();
+  const accent = document.getElementById('ac_accent').value;
+  const accent2 = document.getElementById('ac_accent2').value;
+  const errEl = document.getElementById('ac_error');
+  errEl.style.display='none';
+  if(!name){ errEl.textContent='Enter a business/coach name.'; errEl.style.display='block'; return; }
+  if(!email || !email.includes('@')){ errEl.textContent='Enter a valid email address.'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('ac_send_btn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try{
+    const { data:{ session:s } } = await sb.auth.getSession();
+    const res = await fetch('/.netlify/functions/invite-coach', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+(s?s.access_token:'') },
+      body: JSON.stringify({ email, orgName:name, accent, accent2 })
+    });
+    const result = await res.json().catch(()=>({}));
+    if(!res.ok){ throw new Error(result.error || 'Could not send invite'); }
+    document.getElementById('addCoachFormWrap').innerHTML = '';
+    showToast(`Invite sent to ${email}`);
+    await loadCoachOrgs();
+    render();
+  }catch(e){
+    errEl.textContent = e.message; errEl.style.display='block';
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Send Invite'; }
+  }
 }
 
 /* ======================================================================
@@ -1419,12 +1545,12 @@ function renderCheckinsHistoryTab(c, isCoach){
     const pg = buildCheckinPhotoGallery(ci);
     return `
     <details class="card collapsible" style="margin-top:12px;">
-      <summary>Week ${ci.week} — Full Check-In ${!ci.coachReviewed?'<span class="badge badge-amber" style="margin-left:8px;">Needs review</span>':''}</summary>
+      <summary>Check-In ${ci.week} — ${ci.date}${ci.date?` — ${new Date(ci.date+'T00:00:00').toLocaleDateString(undefined,{weekday:'long'})}`:''} ${!ci.coachReviewed?'<span class="badge badge-amber" style="margin-left:8px;">Needs review</span>':''}</summary>
       <div style="margin-top:12px;">${renderDailyTable(ci.days, false)}</div>
       <div class="qa-card" style="margin-top:14px;">
-        ${Object.keys(CHECKIN_QUESTION_LABELS).map(k=>{
-          const v = ci[k]; if(v===undefined||v==='') return '';
-          return `<div class="qa-row"><span>${CHECKIN_QUESTION_LABELS[k]}</span><span>${v}</span></div>`;
+        ${CHECKIN_QUESTIONS.map(q=>{
+          const v = ci[q.key]; if(v===undefined||v==='') return '';
+          return `<div class="qa-row"><span>${escapeHtml(q.label)}</span><span>${escapeHtml(String(v))}</span></div>`;
         }).join('')}
       </div>
       <div class="card" style="margin-top:14px;">
@@ -1488,17 +1614,6 @@ async function markCheckinReviewed(clientId, checkinId){
   showToast('Marked as reviewed');
   render();
 }
-const CHECKIN_QUESTION_LABELS = {
-  weight:'Weight (kg)', bloodPressure:'Fasted Blood Pressure (L arm)', bloodGlucose:'Fasted Blood Glucose',
-  sleepHours:'Avg sleep hours', sleepRating:'Sleep rating (1-5)', nutritionFollowed:'Followed nutrition plan 100%?',
-  nutritionDetails:'What was different', hunger:'Hunger levels (1-5)', digestionFeedback:'Digestion feedback',
-  bowelFrequency:'Bowel movement frequency', waterIntake:'Average water intake', trainingCompleted:'Completed training 100%?',
-  trainingDetails:'What was done differently', trainingIntensity:'Training intensity (1-5)', trainingConcerns:'Training concerns / strength notes',
-  recoveryRating:'Recovery rating (1-5)', cardioCompleted:'Completed cardio 100%?', avgHeartRate:'Avg cardio heart rate',
-  stressRating:'Stress levels (1-5)', stressors:'Added stressors', overallAdherence:'Overall adherence (1-5)',
-  clientNotes:'How can I help further?'
-};
-
 /* ======================================================================
    DAILY TRACKER TABLE (used in check-in form + history)
    ====================================================================== */
@@ -2468,6 +2583,259 @@ async function importStarterSupplements(){
 }
 
 /* ======================================================================
+   CHECK-IN FORM BUILDER (coach-editable, shared across every client)
+   ====================================================================== */
+const CHECKIN_Q_TYPES = ['text','textarea','select','rating'];
+function checkinQTypeLabel(t){ return ({text:'Short Text',textarea:'Long Text',select:'Dropdown',rating:'1-5 Rating'})[t]||t; }
+function slugifyKey(label, existingKeys){
+  let base = label.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(' ').filter(Boolean).map((w,i)=> i===0?w:w.charAt(0).toUpperCase()+w.slice(1)).join('');
+  if(!base) base = 'question';
+  let key = base, n = 2;
+  while(existingKeys.includes(key)){ key = base + n; n++; }
+  return key;
+}
+function renderCheckinFormPage(){
+  return `
+  <div class="card">
+    <h3 style="margin-bottom:10px;">PBP Check-In Questions</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Drag the handle to reorder. Changes apply to every client's weekly check-in form immediately.</p>
+    <div class="table-wrap"><table>
+      <tr><th></th><th>Question</th><th>Type</th><th>Options</th><th></th></tr>
+      <tbody class="checkinq-rows">
+        ${CHECKIN_QUESTIONS.map((q,i)=> editingCheckinQIdx===i ? checkinQEditRow(q,i) : checkinQReadRow(q,i)).join('')}
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:16px;">
+    <h3>Add Question</h3>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field" style="flex:2;min-width:220px;"><label>Question Text</label><input type="text" id="cq_label" placeholder="e.g. How did your energy feel this week?"></div>
+      <div class="field"><label>Answer Type</label><select id="cq_type" onchange="toggleCheckinQOptionsField()">
+        <option value="text">Short Text</option><option value="textarea">Long Text</option><option value="select">Dropdown</option><option value="rating">1-5 Rating</option>
+      </select></div>
+      <div class="field" id="cq_options_field" style="display:none;min-width:200px;"><label>Options (comma-separated)</label><input type="text" id="cq_options" placeholder="e.g. Yes, No"></div>
+      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addCheckinQuestion()">Add Question</button></div>
+    </div>
+  </div>`;
+}
+let editingCheckinQIdx = null;
+function checkinQReadRow(q,i){
+  return `<tr>
+    <td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startCheckinQDrag(event)" aria-label="Drag to reorder">&#10022;&#10022;</span></td>
+    <td>${escapeHtml(q.label)}</td>
+    <td>${checkinQTypeLabel(q.type)}</td>
+    <td>${q.type==='select'?escapeHtml((q.options||[]).join(', ')):''}</td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm btn-ghost" onclick="startEditCheckinQ(${i})">Edit</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeCheckinQuestion(${i})">Remove</button></td>
+  </tr>`;
+}
+function checkinQEditRow(q,i){
+  return `<tr>
+    <td></td>
+    <td><input type="text" id="ecq_label_${i}" value="${(q.label||'').replace(/"/g,'&quot;')}" style="width:220px;"></td>
+    <td><select id="ecq_type_${i}">${CHECKIN_Q_TYPES.map(t=>`<option value="${t}"${t===q.type?' selected':''}>${checkinQTypeLabel(t)}</option>`).join('')}</select></td>
+    <td><input type="text" id="ecq_options_${i}" value="${((q.options||[]).join(', ')).replace(/"/g,'&quot;')}" placeholder="e.g. Yes, No" style="width:160px;"></td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm" onclick="saveCheckinQEdit(${i})">Save</button><button type="button" class="btn-sm btn-ghost" onclick="cancelEditCheckinQ()">Cancel</button></td>
+  </tr>`;
+}
+function startEditCheckinQ(i){ editingCheckinQIdx=i; render(); }
+function cancelEditCheckinQ(){ editingCheckinQIdx=null; render(); }
+function toggleCheckinQOptionsField(){
+  const type = document.getElementById('cq_type').value;
+  const field = document.getElementById('cq_options_field');
+  if(field) field.style.display = type==='select' ? '' : 'none';
+}
+async function saveCheckinQEdit(i){
+  const q = CHECKIN_QUESTIONS[i];
+  if(!q) return;
+  const label = document.getElementById(`ecq_label_${i}`).value.trim();
+  if(!label){ showToast('Enter question text', true); return; }
+  const type = document.getElementById(`ecq_type_${i}`).value;
+  const optionsRaw = document.getElementById(`ecq_options_${i}`).value.trim();
+  const options = type==='select' ? optionsRaw.split(',').map(o=>o.trim()).filter(Boolean) : [];
+  const { error } = await sb.from('checkin_questions').update({ label, type, options }).eq('id', q.id);
+  if(error){ showToast('Could not save changes: '+error.message, true); return; }
+  q.label=label; q.type=type; q.options=options;
+  editingCheckinQIdx=null;
+  render(); showToast('Question updated');
+}
+async function addCheckinQuestion(){
+  const label = document.getElementById('cq_label').value.trim();
+  if(!label){ showToast('Enter question text', true); return; }
+  const type = document.getElementById('cq_type').value;
+  const optionsRaw = document.getElementById('cq_options').value.trim();
+  const options = type==='select' ? optionsRaw.split(',').map(o=>o.trim()).filter(Boolean) : [];
+  const key = slugifyKey(label, CHECKIN_QUESTIONS.map(q=>q.key));
+  const sort_order = CHECKIN_QUESTIONS.length + 1;
+  const { data, error } = await sb.from('checkin_questions').insert({ key, label, type, options, placeholder:'', sort_order }).select().single();
+  if(error){ showToast('Could not add question: '+error.message, true); return; }
+  CHECKIN_QUESTIONS.push({ id:data.id, key, label, type, options, placeholder:'' });
+  document.getElementById('cq_label').value=''; document.getElementById('cq_options').value='';
+  render(); showToast('Question added');
+}
+async function removeCheckinQuestion(i){
+  const q = CHECKIN_QUESTIONS[i];
+  if(!q) return;
+  const { error } = await sb.from('checkin_questions').delete().eq('id', q.id);
+  if(error){ showToast('Could not remove question: '+error.message, true); return; }
+  CHECKIN_QUESTIONS.splice(i,1);
+  render(); showToast('Question removed');
+}
+function startCheckinQDrag(e){
+  const row = e.target.closest('tr');
+  if(!row) return;
+  const container = row.closest('.checkinq-rows');
+  if(!container) return;
+  startRowDrag(e, container, 'tr', (from,to)=>reorderCheckinQuestions(from,to));
+}
+async function reorderCheckinQuestions(fromIdx, toIdx){
+  const list = CHECKIN_QUESTIONS;
+  const [moved] = list.splice(fromIdx,1);
+  list.splice(toIdx,0,moved);
+  const results = await Promise.all(list.map((q,i)=>sb.from('checkin_questions').update({sort_order:i}).eq('id',q.id)));
+  const errored = results.find(r=>r.error);
+  if(errored){ showToast('Could not save new order: '+errored.error.message, true); }
+  render();
+}
+
+/* ======================================================================
+   DAILY TRACKER FIELD BUILDER (coach-editable, shared across every client)
+   ====================================================================== */
+const DAILY_FIELD_TYPES = ['number','select','text'];
+function dailyFieldTypeLabel(t){ return ({number:'Number',select:'Dropdown',text:'Text'})[t]||t; }
+function renderDailyFieldsPage(){
+  return `
+  <div class="card">
+    <h3 style="margin-bottom:10px;">Daily Tracker Columns</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Drag the handle to reorder. Changes apply to every client's daily tracker table immediately.</p>
+    <div class="table-wrap"><table>
+      <tr><th></th><th>Column</th><th>Type</th><th>Details</th><th></th></tr>
+      <tbody class="dailyfield-rows">
+        ${DAILY_FIELDS.map((f,i)=> editingDailyFieldIdx===i ? dailyFieldEditRow(f,i) : dailyFieldReadRow(f,i)).join('')}
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:16px;">
+    <h3>Add Column</h3>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field" style="flex:2;min-width:200px;"><label>Column Label</label><input type="text" id="df_label" placeholder="e.g. Cardio Minutes"></div>
+      <div class="field"><label>Type</label><select id="df_type" onchange="toggleDailyFieldDetailFields()">
+        <option value="number">Number</option><option value="select">Dropdown</option><option value="text">Text</option>
+      </select></div>
+      <div class="field" id="df_minmax_field" style="min-width:180px;">
+        <label>Min / Max / Step (optional)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="number" id="df_min" placeholder="Min" style="width:56px;">
+          <input type="number" id="df_max" placeholder="Max" style="width:56px;">
+          <input type="number" id="df_step" placeholder="Step" style="width:56px;">
+        </div>
+      </div>
+      <div class="field" id="df_options_field" style="display:none;min-width:200px;"><label>Options (comma-separated)</label><input type="text" id="df_options" placeholder="e.g. No, Yes"></div>
+      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addDailyField()">Add Column</button></div>
+    </div>
+  </div>`;
+}
+let editingDailyFieldIdx = null;
+function dailyFieldReadRow(f,i){
+  let details = '';
+  if(f.t==='select') details = (f.opts||[]).join(', ');
+  else if(f.t==='number') details = [f.min!==undefined?`min ${f.min}`:'', f.max!==undefined?`max ${f.max}`:'', f.step?`step ${f.step}`:''].filter(Boolean).join(', ');
+  return `<tr>
+    <td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startDailyFieldDrag(event)" aria-label="Drag to reorder">&#10022;&#10022;</span></td>
+    <td>${escapeHtml(f.l)}</td>
+    <td>${dailyFieldTypeLabel(f.t)}</td>
+    <td>${escapeHtml(details)}</td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm btn-ghost" onclick="startEditDailyField(${i})">Edit</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeDailyField(${i})">Remove</button></td>
+  </tr>`;
+}
+function dailyFieldEditRow(f,i){
+  return `<tr>
+    <td></td>
+    <td><input type="text" id="edf_label_${i}" value="${(f.l||'').replace(/"/g,'&quot;')}" style="width:180px;"></td>
+    <td><select id="edf_type_${i}">${DAILY_FIELD_TYPES.map(t=>`<option value="${t}"${t===f.t?' selected':''}>${dailyFieldTypeLabel(t)}</option>`).join('')}</select></td>
+    <td>
+      <input type="text" id="edf_options_${i}" value="${((f.opts||[]).join(', ')).replace(/"/g,'&quot;')}" placeholder="Options (dropdown only)" style="width:110px;">
+      <input type="number" id="edf_min_${i}" value="${f.min!==undefined?f.min:''}" placeholder="Min" style="width:48px;">
+      <input type="number" id="edf_max_${i}" value="${f.max!==undefined?f.max:''}" placeholder="Max" style="width:48px;">
+      <input type="number" id="edf_step_${i}" value="${f.step!==undefined?f.step:''}" placeholder="Step" style="width:48px;">
+    </td>
+    <td style="display:flex;gap:6px;"><button type="button" class="btn-sm" onclick="saveDailyFieldEdit(${i})">Save</button><button type="button" class="btn-sm btn-ghost" onclick="cancelEditDailyField()">Cancel</button></td>
+  </tr>`;
+}
+function startEditDailyField(i){ editingDailyFieldIdx=i; render(); }
+function cancelEditDailyField(){ editingDailyFieldIdx=null; render(); }
+function toggleDailyFieldDetailFields(){
+  const type = document.getElementById('df_type').value;
+  const optField = document.getElementById('df_options_field');
+  const mmField = document.getElementById('df_minmax_field');
+  if(optField) optField.style.display = type==='select' ? '' : 'none';
+  if(mmField) mmField.style.display = type==='number' ? '' : 'none';
+}
+async function saveDailyFieldEdit(i){
+  const f = DAILY_FIELDS[i];
+  if(!f) return;
+  const label = document.getElementById(`edf_label_${i}`).value.trim();
+  if(!label){ showToast('Enter a column label', true); return; }
+  const type = document.getElementById(`edf_type_${i}`).value;
+  const optionsRaw = document.getElementById(`edf_options_${i}`).value.trim();
+  const options = type==='select' ? optionsRaw.split(',').map(o=>o.trim()).filter(Boolean) : [];
+  const minRaw = document.getElementById(`edf_min_${i}`).value;
+  const maxRaw = document.getElementById(`edf_max_${i}`).value;
+  const stepRaw = document.getElementById(`edf_step_${i}`).value;
+  const min = type==='number' && minRaw!=='' ? parseFloat(minRaw) : null;
+  const max = type==='number' && maxRaw!=='' ? parseFloat(maxRaw) : null;
+  const step = type==='number' && stepRaw!=='' ? parseFloat(stepRaw) : null;
+  const { error } = await sb.from('daily_tracker_fields').update({ label, type, options, min, max, step }).eq('id', f.id);
+  if(error){ showToast('Could not save changes: '+error.message, true); return; }
+  f.l=label; f.t=type; f.opts=options; f.min=min===null?undefined:min; f.max=max===null?undefined:max; f.step=step===null?undefined:step;
+  editingDailyFieldIdx=null;
+  render(); showToast('Column updated');
+}
+async function addDailyField(){
+  const label = document.getElementById('df_label').value.trim();
+  if(!label){ showToast('Enter a column label', true); return; }
+  const type = document.getElementById('df_type').value;
+  const optionsRaw = document.getElementById('df_options').value.trim();
+  const options = type==='select' ? optionsRaw.split(',').map(o=>o.trim()).filter(Boolean) : [];
+  const minRaw = document.getElementById('df_min').value;
+  const maxRaw = document.getElementById('df_max').value;
+  const stepRaw = document.getElementById('df_step').value;
+  const min = type==='number' && minRaw!=='' ? parseFloat(minRaw) : null;
+  const max = type==='number' && maxRaw!=='' ? parseFloat(maxRaw) : null;
+  const step = type==='number' && stepRaw!=='' ? parseFloat(stepRaw) : null;
+  const key = slugifyKey(label, DAILY_FIELDS.map(f=>f.k));
+  const sort_order = DAILY_FIELDS.length + 1;
+  const { data, error } = await sb.from('daily_tracker_fields').insert({ key, label, type, options, min, max, step, sort_order }).select().single();
+  if(error){ showToast('Could not add column: '+error.message, true); return; }
+  DAILY_FIELDS.push({ id:data.id, k:key, l:label, t:type, opts:options, min:min===null?undefined:min, max:max===null?undefined:max, step:step===null?undefined:step });
+  document.getElementById('df_label').value=''; document.getElementById('df_options').value=''; document.getElementById('df_min').value=''; document.getElementById('df_max').value=''; document.getElementById('df_step').value='';
+  render(); showToast('Column added');
+}
+async function removeDailyField(i){
+  const f = DAILY_FIELDS[i];
+  if(!f) return;
+  const { error } = await sb.from('daily_tracker_fields').delete().eq('id', f.id);
+  if(error){ showToast('Could not remove column: '+error.message, true); return; }
+  DAILY_FIELDS.splice(i,1);
+  render(); showToast('Column removed');
+}
+function startDailyFieldDrag(e){
+  const row = e.target.closest('tr');
+  if(!row) return;
+  const container = row.closest('.dailyfield-rows');
+  if(!container) return;
+  startRowDrag(e, container, 'tr', (from,to)=>reorderDailyFields(from,to));
+}
+async function reorderDailyFields(fromIdx, toIdx){
+  const list = DAILY_FIELDS;
+  const [moved] = list.splice(fromIdx,1);
+  list.splice(toIdx,0,moved);
+  const results = await Promise.all(list.map((f,i)=>sb.from('daily_tracker_fields').update({sort_order:i}).eq('id',f.id)));
+  const errored = results.find(r=>r.error);
+  if(errored){ showToast('Could not save new order: '+errored.error.message, true); }
+  render();
+}
+
+/* ======================================================================
    TRAINING SPLIT
    ====================================================================== */
 function normalizeExercises(exercises){
@@ -2613,12 +2981,15 @@ function renderPedSupplementsTab(c, isCoach){
       </tbody>
     </table></div>`}
     ${isCoach ? `
-    <div class="row pedsupp-add-row" style="margin-top:12px;align-items:flex-end;">
-      <div class="field"><label>Compound</label><input list="pedList" id="pl_drug" placeholder="e.g. Testosterone Enanthate"></div>
-      <div class="field"><label>Dose</label><input id="pl_dose"></div>
-      <div class="field"><label>Frequency</label><input list="freqList" id="pl_freq"></div>
-      <div class="field"><label>Notes</label><input id="pl_notes"></div>
-      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addPedLog('${c.id}')">Add Entry</button></div>
+    <div class="pedsupp-add-panel">
+      <div class="pedsupp-add-title">Add Compound</div>
+      <div class="row pedsupp-add-row">
+        <div class="field"><label>Compound</label><input list="pedList" id="pl_drug" placeholder="e.g. Testosterone Enanthate" autocomplete="off"></div>
+        <div class="field"><label>Dose</label><input id="pl_dose" placeholder="e.g. 250mg" autocomplete="off"></div>
+        <div class="field"><label>Frequency</label><input list="freqList" id="pl_freq" placeholder="e.g. E3.5D" autocomplete="off"></div>
+        <div class="field"><label>Notes</label><input id="pl_notes" placeholder="Optional" autocomplete="off"></div>
+      </div>
+      <button class="btn btn-sm" onclick="addPedLog('${c.id}')">Add Entry</button>
     </div>` : ''}
     <div class="disclaimer">Logged for personal record-keeping and coach oversight only — not medical advice. Recommend regular bloodwork with a physician during any cycle.</div>
   </div>
@@ -2633,11 +3004,14 @@ function renderPedSupplementsTab(c, isCoach){
       </tbody>
     </table></div>`}
     ${isCoach ? `
-    <div class="row pedsupp-add-row" style="margin-top:12px;align-items:flex-end;">
-      <div class="field"><label>Supplement</label><input list="suppList" id="sl_drug"></div>
-      <div class="field"><label>Dose</label><input id="sl_dose"></div>
-      <div class="field"><label>Timing</label><select id="sl_timing">${['Fasted','Meal 1','Any Meal','Pre Bed'].map(t=>`<option>${t}</option>`).join('')}</select></div>
-      <div class="field" style="flex:0 0 auto;"><button class="btn btn-sm" onclick="addSupplementLog('${c.id}')">Add Entry</button></div>
+    <div class="pedsupp-add-panel">
+      <div class="pedsupp-add-title">Add Supplement</div>
+      <div class="row pedsupp-add-row">
+        <div class="field"><label>Supplement</label><input list="suppList" id="sl_drug" placeholder="e.g. Vitamin D3" autocomplete="off"></div>
+        <div class="field"><label>Dose</label><input id="sl_dose" placeholder="e.g. 5000IU" autocomplete="off"></div>
+        <div class="field"><label>Timing</label><select id="sl_timing">${['Fasted','Meal 1','Any Meal','Pre Bed'].map(t=>`<option>${t}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn btn-sm" onclick="addSupplementLog('${c.id}')">Add Entry</button>
     </div>` : ''}
   </div>
   <div class="card" style="margin-bottom:16px;">
@@ -2889,6 +3263,13 @@ function selectQ(id, question, options){
   return `<div class="field"><label style="text-transform:none;font-size:13px;color:var(--text);font-weight:600;">${question}</label><select id="${id}">${options.map(o=>`<option>${o}</option>`).join('')}</select></div>`;
 }
 
+function renderCheckinQuestionInput(q){
+  const id = 'pbp_'+q.key;
+  if(q.type==='textarea') return areaQ(id, q.label, q.placeholder);
+  if(q.type==='select') return selectQ(id, q.label, q.options||[]);
+  if(q.type==='rating') return ratingRow(id, q.label, '', '', 3);
+  return textQ(id, q.label, q.placeholder);
+}
 function renderWeeklyCheckinForm(c){
   return `
   <div class="card qform-card">
@@ -2898,42 +3279,7 @@ function renderWeeklyCheckinForm(c){
   </div>
 
   <div class="card qform-card">
-    ${textQ('pbp_weight','Weight (kg)')}
-    ${textQ('pbp_bloodPressure','Fasted Blood Pressure (check 15 mins after 1L of water — use left arm always)')}
-    ${textQ('pbp_bloodGlucose','Fasted Blood Glucose (check 15 mins after 1L of water)')}
-  </div>
-
-  <div class="card qform-card">
-    ${textQ('pbp_sleepHours','How many hours of sleep are you getting on average?')}
-    ${ratingRow('pbp_sleepRating','How would you rate your sleep?','Really bad','Amazing',3)}
-  </div>
-
-  <div class="card qform-card">
-    ${selectQ('pbp_nutritionFollowed','Did you follow your nutrition plan 100%?',['Yes','No'])}
-    ${areaQ('pbp_nutritionDetails','If "No" please provide details about anything you did differently')}
-  </div>
-
-  <div class="card qform-card">
-    ${ratingRow('pbp_hunger','Hunger levels','Extremely Full','Starving',3)}
-    ${areaQ('pbp_digestionFeedback','Do you have any feedback or concerns regarding digestion? (i.e. bloating, cramping, loose stools, constipation, reflux, burping, etc...)')}
-    ${selectQ('pbp_bowelFrequency','Bowel movement frequency',['Less than 1x per day','1x per day','More than 1x per day','More than 3x per day'])}
-    ${textQ('pbp_waterIntake','Average water intake')}
-  </div>
-
-  <div class="card qform-card">
-    ${selectQ('pbp_trainingCompleted','Did you complete your training sessions 100%?',['Yes','No','N/A'])}
-    ${textQ('pbp_trainingDetails','If "No", what was done according to plan?')}
-    ${ratingRow('pbp_trainingIntensity','How would you rate your intensity during training?','','',3)}
-    ${areaQ('pbp_trainingConcerns','Any concerns with training or are you getting stronger? (i.e. losing strength, not feeling motivated, etc...)')}
-    ${ratingRow('pbp_recoveryRating','How would you rate your recovery from session to session?','Everything hurts','Amazing',3)}
-  </div>
-
-  <div class="card qform-card">
-    ${selectQ('pbp_cardioCompleted','Was all your cardio completed 100%?',['Yes','No','N/A'])}
-    ${textQ('pbp_avgHeartRate','What was your average heart rate during cardio?')}
-    ${ratingRow('pbp_stressRating','How would you rate your stress levels this week?','Chill as a cucumber','Super Stressed',3)}
-    ${textQ('pbp_stressors','Do you have any added stressors this week?')}
-    ${ratingRow('pbp_overallAdherence','How would you rate your overall adherence to your goals this week?','','',3)}
+    ${CHECKIN_QUESTIONS.map(q=>renderCheckinQuestionInput(q)).join('')}
   </div>
 
   <div class="card qform-card">
@@ -2942,10 +3288,6 @@ function renderWeeklyCheckinForm(c){
     <div class="row" style="gap:24px;">
       ${uploadBox('front','Front')} ${uploadBox('side','Side')} ${uploadBox('back','Back')}
     </div>
-  </div>
-
-  <div class="card qform-card">
-    ${areaQ('pbp_clientNotes','Is there any way I can be of better help to you? Do you need more assistance in anything?')}
   </div>
 
   <button class="btn" id="checkinSubmitBtn" onclick="submitWeeklyCheckin('${c.id}')">Submit Check-In</button>
@@ -2997,10 +3339,6 @@ function resizeImage(file, maxDim, quality, cb){
   reader.readAsDataURL(file);
 }
 
-const CHECKIN_TEXT_FIELDS = ['bloodPressure','bloodGlucose','sleepHours','nutritionDetails','digestionFeedback','waterIntake','trainingDetails','trainingConcerns','avgHeartRate','stressors','clientNotes'];
-const CHECKIN_SELECT_FIELDS = ['nutritionFollowed','bowelFrequency','trainingCompleted','cardioCompleted'];
-const CHECKIN_RATING_FIELDS = ['sleepRating','hunger','trainingIntensity','recoveryRating','stressRating','overallAdherence'];
-
 async function uploadPhotosForAngle(clientId, week, angle){
   const urls = checkinPhotoDrafts[angle] || [];
   const paths = [];
@@ -3017,8 +3355,8 @@ async function uploadPhotosForAngle(clientId, week, angle){
 async function submitWeeklyCheckin(clientId){
   const c=getClient(clientId);
   const days = c.dailyDraft || [];
-  const weightVal = document.getElementById('pbp_weight').value;
-  if(!weightVal){ showToast('Please enter your weight to submit your check-in', true); return; }
+  const weightEl = document.getElementById('pbp_weight');
+  if(weightEl && !weightEl.value){ showToast('Please enter your weight to submit your check-in', true); return; }
 
   const submitBtn = document.getElementById('checkinSubmitBtn');
   if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Submitting…'; }
@@ -3034,12 +3372,16 @@ async function submitWeeklyCheckin(clientId){
 
   const payload = {
     days,
-    weight: parseFloat(weightVal) || 0,
     photos: { front:frontPaths, side:sidePaths, back:backPaths },
     coachFeedback: 'Awaiting coach review'
   };
-  CHECKIN_TEXT_FIELDS.concat(CHECKIN_SELECT_FIELDS).forEach(k=>{ payload[k] = document.getElementById('pbp_'+k).value; });
-  CHECKIN_RATING_FIELDS.forEach(k=>{ payload[k] = parseInt(document.getElementById('pbp_'+k).value); });
+  CHECKIN_QUESTIONS.forEach(q=>{
+    const el = document.getElementById('pbp_'+q.key);
+    if(!el) return;
+    if(q.type==='rating') payload[q.key] = parseInt(el.value);
+    else if(q.key==='weight') payload[q.key] = parseFloat(el.value) || 0;
+    else payload[q.key] = el.value;
+  });
 
   const { data, error } = await sb.from('checkins').insert({ client_id: clientId, week, date, payload }).select().single();
   if(error){
