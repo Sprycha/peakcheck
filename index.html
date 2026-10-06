@@ -156,6 +156,28 @@
   .exercise-read-name{font-weight:700;font-size:13.5px;}
   .exercise-read-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:2px;font-size:12px;}
   .exercise-read-reps{color:var(--accent2);font-weight:700;}
+  .ex-block{border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--bg);}
+  .ex-block.ss,.ex-read.ss{border-left:3px solid var(--accent2);}
+  .ss-tag{font-size:10.5px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;}
+  .ss-link-btn{display:block;width:100%;text-align:left;background:none;border:1px dashed var(--border);color:var(--sub);border-radius:8px;padding:5px 10px;font-size:11.5px;margin-bottom:10px;cursor:pointer;}
+  .ss-link-btn.on{border-style:solid;border-color:var(--accent2);color:var(--accent2);}
+  .ex-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+  .ex-head .exercise-name{font-weight:700;color:var(--accent);flex:1;min-width:0;}
+  .ex-block .exercise-notes{margin-bottom:8px;font-size:12.5px;}
+  .set-table,.set-table-read{width:100%;border-collapse:collapse;}
+  .set-table th,.set-table-read th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);text-align:left;padding:4px 6px;}
+  .set-table td,.set-table-read td{padding:4px 6px;border-top:1px solid var(--border);}
+  .set-table-read td:last-child{text-align:left;}
+  .set-label{font-weight:700;width:36px;}
+  .set-label.set-warmup{color:var(--accent2);}
+  .set-label.set-drop{color:#4aa8ff;}
+  .ex-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;flex-wrap:wrap;}
+  .ex-setcount{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub);text-transform:none;margin:0;}
+  .ex-setcount input{width:56px;}
+  .ex-read{padding:10px 0 10px 10px;border-bottom:1px solid var(--border);}
+  .ex-read:last-child{border-bottom:none;}
+  .ex-read-name{font-weight:700;font-size:14px;color:var(--accent);}
+  .ex-read-notes{font-size:12.5px;color:var(--sub);margin:3px 0 6px;}
   .meal-instructions-read{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px;}
   .meal-instructions-read .meal-instructions-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);font-weight:700;margin-bottom:4px;}
   .meal-instructions-read p{margin:0;font-size:13px;line-height:1.5;white-space:pre-wrap;}
@@ -2864,53 +2886,98 @@ async function reorderDailyFields(fromIdx, toIdx){
 /* ======================================================================
    TRAINING SPLIT
    ====================================================================== */
+const SET_TYPES = [['working','Working'],['warmup','Warm-up'],['drop','Drop set']];
+function newSet(type){ return { type:type||'working', reps:'' }; }
 function normalizeExercises(exercises){
-  return (exercises||[]).map(ex => typeof ex === 'string' ? { name: ex, reps:'', notes:'' } : ex);
+  return (exercises||[]).map(ex=>{
+    if(typeof ex==='string') ex = { name: ex };
+    const sets = (Array.isArray(ex.sets) && ex.sets.length)
+      ? ex.sets.map(s=>({ type: s.type||'working', reps: s.reps||'' }))
+      : [{ type:'working', reps: ex.reps||'' }];
+    return { name: ex.name||'', notes: ex.notes||'', sets, linked: !!ex.linked };
+  });
 }
-function exerciseRowHTML(ex){
-  ex = ex || {};
-  return `<tr>
-    <td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startExerciseRowDrag(event)" aria-label="Drag to reorder">&#10022;&#10022;</span></td>
-    <td><input type="text" class="exercise-name" value="${(ex.name||'').replace(/"/g,'&quot;')}" placeholder="Exercise"></td>
-    <td><input type="text" class="exercise-reps" value="${(ex.reps||'').replace(/"/g,'&quot;')}" placeholder="e.g. 8-12"></td>
-    <td><input type="text" class="exercise-notes" value="${(ex.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes"></td>
-    <td><button type="button" class="dyn-row-remove" onclick="this.closest('tr').remove()">&#10005;</button></td>
-  </tr>`;
+// W = warm-up, D = drop set, working sets are numbered 1,2,3...
+function setLabels(sets){
+  let n = 0;
+  return sets.map(s=> s.type==='warmup' ? 'W' : (s.type==='drop' ? 'D' : String(++n)));
 }
-function startExerciseRowDrag(e){
-  const row = e.target.closest('tr');
+// An exercise with linked:true is superset-linked to the exercise above it.
+function supersetInfo(exs){
+  const info = exs.map(()=>({ letter:'', pos:'' }));
+  let g = 0, i = 0;
+  while(i < exs.length){
+    let j = i;
+    while(j+1 < exs.length && exs[j+1].linked) j++;
+    if(j > i){
+      const letter = String.fromCharCode(65 + g++);
+      for(let k=i;k<=j;k++){ info[k].letter = letter; info[k].pos = k===i ? 'start' : (k===j ? 'end' : 'mid'); }
+    }
+    i = j + 1;
+  }
+  return info;
+}
+function exerciseBlockHTML(clientId, di, ei, ex, info){
+  const labels = setLabels(ex.sets);
+  return `<div class="ex-block${info.letter?' ss ss-'+info.pos:''}" data-linked="${ex.linked&&ei>0?1:0}">
+    ${ei>0 ? `<button type="button" class="ss-link-btn${ex.linked?' on':''}" onclick="trToggleLink('${clientId}',${di},${ei})">${ex.linked?'&#128279; Superset with exercise above &mdash; tap to unlink':'&#128279; Link as superset with exercise above'}</button>` : ''}
+    ${info.letter ? `<div class="ss-tag">Superset ${info.letter}</div>` : ''}
+    <div class="ex-head">
+      <span class="drag-handle" onpointerdown="startExerciseBlockDrag(event,'${clientId}')" aria-label="Drag to reorder">&#10022;&#10022;</span>
+      <input type="text" class="exercise-name" value="${escapeHtml(ex.name)}" placeholder="Exercise name">
+      <button type="button" class="dyn-row-remove" onclick="trRemoveExercise('${clientId}',${di},${ei})">&#10005;</button>
+    </div>
+    <input type="text" class="exercise-notes" value="${escapeHtml(ex.notes)}" placeholder="Notes (e.g. drop set back to original weight, AMRAP)">
+    <table class="set-table">
+      <tr><th>Set</th><th>Type</th><th>Rep Range</th><th></th></tr>
+      ${ex.sets.map((s,si)=>`
+      <tr class="set-row">
+        <td class="set-label set-${s.type}">${labels[si]}</td>
+        <td><select class="set-type" onchange="trRefresh('${clientId}')">${SET_TYPES.map(([v,l])=>`<option value="${v}"${s.type===v?' selected':''}>${l}</option>`).join('')}</select></td>
+        <td><input type="text" class="set-reps" value="${escapeHtml(s.reps)}" placeholder="e.g. 8-12"></td>
+        <td><button type="button" class="dyn-row-remove" onclick="trRemoveSet('${clientId}',${di},${ei},${si})">&#10005;</button></td>
+      </tr>`).join('')}
+    </table>
+    <div class="ex-actions">
+      <button type="button" class="btn-sm btn-ghost" onclick="trAddSet('${clientId}',${di},${ei})">+ Add Set</button>
+      <label class="ex-setcount">Total sets <input type="number" min="1" max="20" value="${ex.sets.length}" onchange="trSetCount('${clientId}',${di},${ei},this.value)"></label>
+    </div>
+  </div>`;
+}
+function exerciseReadHTML(ex, info){
+  const labels = setLabels(ex.sets);
+  const anyReps = ex.sets.some(s=>s.reps);
+  return `<div class="ex-read${info.letter?' ss ss-'+info.pos:''}">
+    ${info.letter && info.pos==='start' ? `<div class="ss-tag">Superset ${info.letter}</div>` : ''}
+    <div class="ex-read-name">${escapeHtml(ex.name)}</div>
+    ${ex.notes ? `<div class="ex-read-notes">${escapeHtml(ex.notes)}</div>` : ''}
+    <table class="set-table-read">
+      <tr><th>Set</th><th>Rep Range</th></tr>
+      ${ex.sets.map((s,si)=>`<tr><td class="set-label set-${s.type}">${labels[si]}</td><td>${s.reps?escapeHtml(s.reps):'&ndash;'}</td></tr>`).join('')}
+    </table>
+  </div>`;
+}
+function startExerciseBlockDrag(e, clientId){
+  const row = e.target.closest('.ex-block');
   if(!row) return;
-  const container = row.closest('.exercise-rows');
-  if(!container) return;
-  startRowDrag(e, container, 'tr', ()=>{});
+  startRowDrag(e, row.parentElement, '.ex-block', ()=>{ syncTrainingFromDom(clientId); render(); });
 }
 function renderTrainingSplitBlock(c, editable){
   return `<div class="grid" style="grid-template-columns:1fr;gap:14px;" id="trainingSplitWrap">
     ${c.trainingSplit.map((d,di)=>{
       const exercises = normalizeExercises(d.exercises);
+      const info = supersetInfo(exercises);
       return `
       <div class="card" data-day-idx="${di}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;">
           ${inp('', d.label, editable, 'text', 'class="day-label" style="font-weight:700;font-size:14px;"').replace('id=""','')}
         </div>
         ${editable ? `
-        <div class="table-wrap"><table>
-          <tr><th></th><th>Exercise</th><th>Rep Range</th><th>Notes</th><th></th></tr>
-          <tbody class="exercise-rows">
-            ${exercises.map(ex=>exerciseRowHTML(ex)).join('')}
-          </tbody>
-        </table></div>
-        <button class="btn-sm btn-ghost" type="button" style="margin-top:10px;" onclick="addExerciseRow(this)">+ Add Exercise</button>
+        <div class="ex-list">${exercises.map((ex,ei)=>exerciseBlockHTML(c.id, di, ei, ex, info[ei])).join('')}</div>
+        <button class="btn-sm btn-ghost" type="button" style="margin-top:4px;" onclick="trAddExercise('${c.id}',${di})">+ Add Exercise</button>
         ` : `
-        <div class="exercise-read-list">
-          ${exercises.length===0 ? `<div class="muted" style="font-size:12.5px;">No exercises added yet.</div>` : exercises.map(ex=>`
-          <div class="exercise-read-row">
-            <div class="exercise-read-name">${escapeHtml(ex.name||'')}</div>
-            <div class="exercise-read-meta">
-              ${ex.reps ? `<span class="exercise-read-reps">${escapeHtml(ex.reps)}</span>` : ''}
-              ${ex.notes ? `<span class="exercise-read-notes muted">${escapeHtml(ex.notes)}</span>` : ''}
-            </div>
-          </div>`).join('')}
+        <div class="ex-read-list">
+          ${exercises.length===0 ? `<div class="muted" style="font-size:12.5px;">No exercises added yet.</div>` : exercises.map((ex,ei)=>exerciseReadHTML(ex, info[ei])).join('')}
         </div>
         `}
       </div>`;
@@ -2918,30 +2985,71 @@ function renderTrainingSplitBlock(c, editable){
   </div>
   ${editable?`<div style="margin-top:14px;display:flex;gap:10px;"><button class="btn-sm btn-ghost" type="button" onclick="addTrainingDay('${c.id}')">+ Add Training Day</button><button class="btn" onclick="saveTrainingSplit('${c.id}')">Save Training Split</button></div>`:''}`;
 }
-function addExerciseRow(btn){
-  const card = btn.closest('.card');
-  card.querySelector('.exercise-rows').insertAdjacentHTML('beforeend', exerciseRowHTML({}));
+// Copy whatever is currently typed in the editor into the in-memory model,
+// so structural changes (add/remove/link/reorder) never lose unsaved typing.
+function syncTrainingFromDom(clientId){
+  const c = getClient(clientId);
+  const wrap = document.getElementById('trainingSplitWrap');
+  if(!c || !wrap) return;
+  const split = [];
+  Array.from(wrap.children).filter(el=>el.classList.contains('card')).forEach(card=>{
+    const exercises = [];
+    card.querySelectorAll('.ex-block').forEach(b=>{
+      exercises.push({
+        name: b.querySelector('.exercise-name').value,
+        notes: b.querySelector('.exercise-notes').value,
+        linked: b.dataset.linked === '1',
+        sets: Array.from(b.querySelectorAll('.set-row')).map(r=>({ type: r.querySelector('.set-type').value, reps: r.querySelector('.set-reps').value }))
+      });
+    });
+    split.push({ label: card.querySelector('.day-label').value, exercises });
+  });
+  c.trainingSplit = split;
+}
+function trMutate(clientId, fn){
+  syncTrainingFromDom(clientId);
+  const c = getClient(clientId);
+  fn(c.trainingSplit);
+  render();
+}
+function trRefresh(clientId){ trMutate(clientId, ()=>{}); }
+function trAddExercise(clientId, di){
+  trMutate(clientId, split=>{ split[di].exercises.push({ name:'', notes:'', linked:false, sets:[newSet(),newSet(),newSet()] }); });
+}
+function trRemoveExercise(clientId, di, ei){
+  trMutate(clientId, split=>{ split[di].exercises.splice(ei,1); });
+}
+function trAddSet(clientId, di, ei){
+  trMutate(clientId, split=>{ split[di].exercises[ei].sets.push(newSet()); });
+}
+function trRemoveSet(clientId, di, ei, si){
+  trMutate(clientId, split=>{ const sets = split[di].exercises[ei].sets; if(sets.length>1) sets.splice(si,1); });
+}
+function trSetCount(clientId, di, ei, n){
+  n = Math.max(1, Math.min(20, parseInt(n)||1));
+  trMutate(clientId, split=>{
+    const sets = split[di].exercises[ei].sets;
+    while(sets.length < n) sets.push(newSet());
+    while(sets.length > n) sets.pop();
+  });
+}
+function trToggleLink(clientId, di, ei){
+  trMutate(clientId, split=>{ const ex = split[di].exercises[ei]; ex.linked = !ex.linked; });
 }
 async function saveTrainingSplit(clientId){
-  const c=getClient(clientId);
-  const cards = document.querySelectorAll('#trainingSplitWrap .card');
-  const split=[];
-  cards.forEach(card=>{
-    const label = card.querySelector('.day-label').value;
-    const exercises = [];
-    card.querySelectorAll('.exercise-rows tr').forEach(row=>{
-      const name = row.querySelector('.exercise-name').value;
-      const reps = row.querySelector('.exercise-reps').value;
-      const notes = row.querySelector('.exercise-notes').value;
-      if(name.trim()!=='') exercises.push({name, reps, notes});
-    });
-    split.push({label, exercises});
-  });
+  const c = getClient(clientId);
+  syncTrainingFromDom(clientId);
+  const split = c.trainingSplit.map(d=>({
+    label: d.label,
+    exercises: d.exercises.filter(ex=>ex.name.trim()!=='')
+  }));
   const { error } = await sb.from('clients').update({ training_split: split }).eq('id', clientId);
   if(error){ showToast('Could not save training split: '+error.message, true); return; }
   c.trainingSplit = split; showToast('Training split saved');
+  render();
 }
 function addTrainingDay(clientId){
+  syncTrainingFromDom(clientId);
   const c = getClient(clientId);
   c.trainingSplit.push({label:`Day ${c.trainingSplit.length+1}`, exercises:[]});
   render();
