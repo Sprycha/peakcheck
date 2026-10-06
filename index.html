@@ -156,28 +156,46 @@
   .exercise-read-name{font-weight:700;font-size:13.5px;}
   .exercise-read-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:2px;font-size:12px;}
   .exercise-read-reps{color:var(--accent2);font-weight:700;}
-  .ex-block{border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--bg);}
-  .ex-block.ss,.ex-read.ss{border-left:3px solid var(--accent2);}
-  .ss-tag{font-size:10.5px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;}
-  .ss-link-btn{display:block;width:100%;text-align:left;background:none;border:1px dashed var(--border);color:var(--sub);border-radius:8px;padding:5px 10px;font-size:11.5px;margin-bottom:10px;cursor:pointer;}
-  .ss-link-btn.on{border-style:solid;border-color:var(--accent2);color:var(--accent2);}
-  .ex-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
-  .ex-head .exercise-name{font-weight:700;color:var(--accent);flex:1;min-width:0;}
-  .ex-block .exercise-notes{margin-bottom:8px;font-size:12.5px;}
-  .set-table,.set-table-read{width:100%;border-collapse:collapse;}
-  .set-table th,.set-table-read th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);text-align:left;padding:4px 6px;}
-  .set-table td,.set-table-read td{padding:4px 6px;border-top:1px solid var(--border);}
-  .set-table-read td:last-child{text-align:left;}
-  .set-label{font-weight:700;width:36px;}
+  .ex-block{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+  .ex-block.ss-start,.ex-block.ss-mid{margin-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom:none;}
+  .ex-block.ss-mid,.ex-block.ss-end{border-top-left-radius:0;border-top-right-radius:0;}
+  .ex-block.ss-end{margin-bottom:12px;}
+  .ex-block.ss{border-left:3px solid var(--accent2);}
+  .ex-block input[type=text],.ex-block input[type=number]{background:transparent;border-color:transparent;padding:6px 8px;}
+  .ex-block input[type=text]:hover,.ex-block input[type=number]:hover{border-color:var(--border);}
+  .ex-block input[type=text]:focus,.ex-block input[type=number]:focus{background:var(--bg);border-color:var(--accent);}
+  .ss-tag{font-size:10px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.06em;margin:0 0 2px 30px;}
+  .ss-join{display:flex;justify-content:center;margin:-6px 0 6px;}
+  .ss-join.linked{margin:0;padding:5px 0;background:var(--panel);border-left:3px solid var(--accent2);border-right:1px solid var(--border);}
+  .ss-join-btn{background:var(--bg);border:1px solid var(--border);color:var(--sub);border-radius:999px;padding:3px 12px;font-size:11px;cursor:pointer;}
+  .ss-join-btn:hover{color:var(--accent2);border-color:var(--accent2);}
+  .ss-join-btn.on{color:var(--accent2);border-color:var(--accent2);background:rgba(255,178,56,.08);}
+  .ex-head{display:flex;align-items:center;gap:4px;}
+  .ex-head .exercise-name{font-weight:700;font-size:15px;color:var(--accent);flex:1;min-width:0;}
+  .ex-block .exercise-notes{font-size:12.5px;color:var(--sub);margin:0 0 8px 26px;width:calc(100% - 26px);}
+  .set-head,.set-row{display:grid;grid-template-columns:44px 1fr 150px 28px;align-items:center;gap:8px;padding:0 0 0 26px;}
+  .set-head{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:2px;}
+  .set-row{padding-top:3px;padding-bottom:3px;}
+  .set-badge{width:34px;height:30px;border-radius:8px;border:none;background:var(--panel2);color:var(--text);font-weight:700;font-size:13px;cursor:pointer;}
+  .set-badge.set-warmup{background:rgba(255,178,56,.18);color:var(--accent2);}
+  .set-badge.set-drop{background:rgba(74,168,255,.18);color:#4aa8ff;}
+  .set-type-name{font-size:12px;color:var(--sub);}
+  .ex-footer{display:flex;align-items:center;justify-content:space-between;margin:8px 0 0 26px;}
+  .set-stepper{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);}
+  .set-stepper button{width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:15px;line-height:1;}
+  .set-stepper button:hover{border-color:var(--accent);}
+  .set-table-read{width:100%;border-collapse:collapse;}
+  .set-table-read th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);text-align:left;padding:4px 6px;}
+  .set-table-read td{padding:5px 6px;border-top:1px solid var(--border);}
+  .set-label{font-weight:700;width:40px;}
   .set-label.set-warmup{color:var(--accent2);}
   .set-label.set-drop{color:#4aa8ff;}
-  .ex-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;flex-wrap:wrap;}
-  .ex-setcount{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub);text-transform:none;margin:0;}
-  .ex-setcount input{width:56px;}
-  .ex-read{padding:10px 0 10px 10px;border-bottom:1px solid var(--border);}
+  .ex-read{padding:12px 0 12px 10px;border-bottom:1px solid var(--border);}
   .ex-read:last-child{border-bottom:none;}
-  .ex-read-name{font-weight:700;font-size:14px;color:var(--accent);}
+  .ex-read.ss{border-left:3px solid var(--accent2);}
+  .ex-read-name{font-weight:700;font-size:14.5px;color:var(--accent);}
   .ex-read-notes{font-size:12.5px;color:var(--sub);margin:3px 0 6px;}
+  @media(max-width:560px){.set-head,.set-row{grid-template-columns:40px 1fr 110px 26px;gap:6px;padding-left:4px;}.ex-block .exercise-notes,.ex-footer{margin-left:4px;width:calc(100% - 4px);}.ss-tag{margin-left:4px;}}
   .meal-instructions-read{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px;}
   .meal-instructions-read .meal-instructions-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);font-weight:700;margin-bottom:4px;}
   .meal-instructions-read p{margin:0;font-size:13px;line-height:1.5;white-space:pre-wrap;}
@@ -2919,28 +2937,27 @@ function supersetInfo(exs){
 }
 function exerciseBlockHTML(clientId, di, ei, ex, info){
   const labels = setLabels(ex.sets);
-  return `<div class="ex-block${info.letter?' ss ss-'+info.pos:''}" data-linked="${ex.linked&&ei>0?1:0}">
-    ${ei>0 ? `<button type="button" class="ss-link-btn${ex.linked?' on':''}" onclick="trToggleLink('${clientId}',${di},${ei})">${ex.linked?'&#128279; Superset with exercise above &mdash; tap to unlink':'&#128279; Link as superset with exercise above'}</button>` : ''}
-    ${info.letter ? `<div class="ss-tag">Superset ${info.letter}</div>` : ''}
+  const typeName = { working:'Working', warmup:'Warm-up', drop:'Drop set' };
+  const join = ei>0 ? `<div class="ss-join${ex.linked?' linked':''}"><button type="button" class="ss-join-btn${ex.linked?' on':''}" onclick="trToggleLink('${clientId}',${di},${ei})">${ex.linked?'&#128279; Superset &mdash; tap to unlink':'&#128279; Superset with above'}</button></div>` : '';
+  return `${join}<div class="ex-block${info.letter?' ss ss-'+info.pos:''}" data-linked="${ex.linked&&ei>0?1:0}">
+    ${info.letter && info.pos==='start' ? `<div class="ss-tag">Superset ${info.letter}</div>` : ''}
     <div class="ex-head">
       <span class="drag-handle" onpointerdown="startExerciseBlockDrag(event,'${clientId}')" aria-label="Drag to reorder">&#10022;&#10022;</span>
       <input type="text" class="exercise-name" value="${escapeHtml(ex.name)}" placeholder="Exercise name">
-      <button type="button" class="dyn-row-remove" onclick="trRemoveExercise('${clientId}',${di},${ei})">&#10005;</button>
+      <button type="button" class="dyn-row-remove" title="Remove exercise" onclick="trRemoveExercise('${clientId}',${di},${ei})">&#10005;</button>
     </div>
-    <input type="text" class="exercise-notes" value="${escapeHtml(ex.notes)}" placeholder="Notes (e.g. drop set back to original weight, AMRAP)">
-    <table class="set-table">
-      <tr><th>Set</th><th>Type</th><th>Rep Range</th><th></th></tr>
-      ${ex.sets.map((s,si)=>`
-      <tr class="set-row">
-        <td class="set-label set-${s.type}">${labels[si]}</td>
-        <td><select class="set-type" onchange="trRefresh('${clientId}')">${SET_TYPES.map(([v,l])=>`<option value="${v}"${s.type===v?' selected':''}>${l}</option>`).join('')}</select></td>
-        <td><input type="text" class="set-reps" value="${escapeHtml(s.reps)}" placeholder="e.g. 8-12"></td>
-        <td><button type="button" class="dyn-row-remove" onclick="trRemoveSet('${clientId}',${di},${ei},${si})">&#10005;</button></td>
-      </tr>`).join('')}
-    </table>
-    <div class="ex-actions">
-      <button type="button" class="btn-sm btn-ghost" onclick="trAddSet('${clientId}',${di},${ei})">+ Add Set</button>
-      <label class="ex-setcount">Total sets <input type="number" min="1" max="20" value="${ex.sets.length}" onchange="trSetCount('${clientId}',${di},${ei},this.value)"></label>
+    <input type="text" class="exercise-notes" value="${escapeHtml(ex.notes)}" placeholder="Add notes (e.g. drop set back to original weight)">
+    <div class="set-head"><span>Set</span><span>Type</span><span>Rep range</span><span></span></div>
+    ${ex.sets.map((s,si)=>`
+    <div class="set-row" data-type="${s.type}">
+      <button type="button" class="set-badge set-${s.type}" title="Tap to change set type" onclick="trCycleType('${clientId}',${di},${ei},${si})">${labels[si]}</button>
+      <span class="set-type-name">${typeName[s.type]}</span>
+      <input type="text" class="set-reps" value="${escapeHtml(s.reps)}" placeholder="e.g. 8-12">
+      <button type="button" class="dyn-row-remove" title="Remove set" onclick="trRemoveSet('${clientId}',${di},${ei},${si})">&#10005;</button>
+    </div>`).join('')}
+    <div class="ex-footer">
+      <span class="set-stepper"><button type="button" onclick="trSetCount('${clientId}',${di},${ei},${ex.sets.length-1})">&minus;</button><b>${ex.sets.length}</b> ${ex.sets.length===1?'set':'sets'}<button type="button" onclick="trSetCount('${clientId}',${di},${ei},${ex.sets.length+1})">+</button></span>
+      
     </div>
   </div>`;
 }
@@ -2973,6 +2990,7 @@ function renderTrainingSplitBlock(c, editable){
           ${inp('', d.label, editable, 'text', 'class="day-label" style="font-weight:700;font-size:14px;"').replace('id=""','')}
         </div>
         ${editable ? `
+        <div class="muted" style="font-size:11.5px;margin:-2px 0 10px 2px;">Tip: tap a set badge to switch Working / Warm-up / Drop set.</div>
         <div class="ex-list">${exercises.map((ex,ei)=>exerciseBlockHTML(c.id, di, ei, ex, info[ei])).join('')}</div>
         <button class="btn-sm btn-ghost" type="button" style="margin-top:4px;" onclick="trAddExercise('${c.id}',${di})">+ Add Exercise</button>
         ` : `
@@ -2999,7 +3017,7 @@ function syncTrainingFromDom(clientId){
         name: b.querySelector('.exercise-name').value,
         notes: b.querySelector('.exercise-notes').value,
         linked: b.dataset.linked === '1',
-        sets: Array.from(b.querySelectorAll('.set-row')).map(r=>({ type: r.querySelector('.set-type').value, reps: r.querySelector('.set-reps').value }))
+        sets: Array.from(b.querySelectorAll('.set-row')).map(r=>({ type: r.dataset.type, reps: r.querySelector('.set-reps').value }))
       });
     });
     split.push({ label: card.querySelector('.day-label').value, exercises });
@@ -3013,6 +3031,10 @@ function trMutate(clientId, fn){
   render();
 }
 function trRefresh(clientId){ trMutate(clientId, ()=>{}); }
+function trCycleType(clientId, di, ei, si){
+  const order = ['working','warmup','drop'];
+  trMutate(clientId, split=>{ const st = split[di].exercises[ei].sets[si]; st.type = order[(order.indexOf(st.type)+1)%3]; });
+}
 function trAddExercise(clientId, di){
   trMutate(clientId, split=>{ split[di].exercises.push({ name:'', notes:'', linked:false, sets:[newSet(),newSet(),newSet()] }); });
 }
