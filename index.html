@@ -156,6 +156,16 @@
   .exercise-read-name{font-weight:700;font-size:13.5px;}
   .exercise-read-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:2px;font-size:12px;}
   .exercise-read-reps{color:var(--accent2);font-weight:700;}
+  .training-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;}
+  @media(max-width:900px){.training-grid{grid-template-columns:1fr;}}
+  .day-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .day-head input{flex:1;min-width:0;}
+  .tr-archive{margin-top:22px;border:1px solid var(--border);border-radius:12px;padding:10px 14px;background:var(--panel);}
+  .tr-archive>summary{cursor:pointer;font-weight:700;font-size:13.5px;}
+  .tr-archived-day{border-top:1px solid var(--border);margin-top:10px;padding-top:8px;}
+  .tr-archived-day>summary{cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap;list-style:none;}
+  .tr-arch-name{font-weight:700;font-size:13.5px;}
+  .tr-arch-actions{margin-left:auto;display:flex;gap:6px;}
   .ex-block{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
   .ex-block.ss-start,.ex-block.ss-mid{margin-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom:none;}
   .ex-block.ss-mid,.ex-block.ss-end{border-top-left-radius:0;border-top-right-radius:0;}
@@ -2980,28 +2990,48 @@ function startExerciseBlockDrag(e, clientId){
   startRowDrag(e, row.parentElement, '.ex-block', ()=>{ syncTrainingFromDom(clientId); render(); });
 }
 function renderTrainingSplitBlock(c, editable){
-  return `<div class="grid" style="grid-template-columns:1fr;gap:14px;" id="trainingSplitWrap">
-    ${c.trainingSplit.map((d,di)=>{
-      const exercises = normalizeExercises(d.exercises);
-      const info = supersetInfo(exercises);
-      return `
-      <div class="card" data-day-idx="${di}">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;">
-          ${inp('', d.label, editable, 'text', 'class="day-label" style="font-weight:700;font-size:14px;"').replace('id=""','')}
-        </div>
-        ${editable ? `
-        <div class="muted" style="font-size:11.5px;margin:-2px 0 10px 2px;">Tip: tap a set badge to switch Working / Warm-up / Drop set.</div>
-        <div class="ex-list">${exercises.map((ex,ei)=>exerciseBlockHTML(c.id, di, ei, ex, info[ei])).join('')}</div>
-        <button class="btn-sm btn-ghost" type="button" style="margin-top:4px;" onclick="trAddExercise('${c.id}',${di})">+ Add Exercise</button>
-        ` : `
-        <div class="ex-read-list">
-          ${exercises.length===0 ? `<div class="muted" style="font-size:12.5px;">No exercises added yet.</div>` : exercises.map((ex,ei)=>exerciseReadHTML(ex, info[ei])).join('')}
-        </div>
-        `}
-      </div>`;
+  const days = c.trainingSplit.map((d,di)=>({d,di}));
+  const active = days.filter(x=>!x.d.archived);
+  const archived = days.filter(x=>x.d.archived);
+  const dayCard = ({d,di})=>{
+    const exercises = normalizeExercises(d.exercises);
+    const info = supersetInfo(exercises);
+    return `
+    <div class="card" data-day-idx="${di}">
+      <div class="day-head">
+        ${inp('', d.label, editable, 'text', 'class="day-label" style="font-weight:700;font-size:14px;"').replace('id=""','')}
+        ${editable ? `<button type="button" class="btn-sm btn-ghost" title="Move to archive" onclick="trArchiveDay('${c.id}',${di})">Archive</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" title="Delete this day" onclick="trDeleteDay('${c.id}',${di})">Delete</button>` : ''}
+      </div>
+      ${editable ? `
+      <div class="muted" style="font-size:11.5px;margin:-2px 0 10px 2px;">Tip: tap a set badge to switch Working / Warm-up / Drop set.</div>
+      <div class="ex-list">${exercises.map((ex,ei)=>exerciseBlockHTML(c.id, di, ei, ex, info[ei])).join('')}</div>
+      <button class="btn-sm btn-ghost" type="button" style="margin-top:4px;" onclick="trAddExercise('${c.id}',${di})">+ Add Exercise</button>
+      ` : `
+      <div class="ex-read-list">
+        ${exercises.length===0 ? `<div class="muted" style="font-size:12.5px;">No exercises added yet.</div>` : exercises.map((ex,ei)=>exerciseReadHTML(ex, info[ei])).join('')}
+      </div>
+      `}
+    </div>`;
+  };
+  const archiveSection = editable ? `
+  <details class="tr-archive"${archived.length?'':''}>
+    <summary>&#128193; Archive (${archived.length})</summary>
+    ${archived.length===0 ? `<div class="muted" style="font-size:12.5px;padding:8px 2px;">No archived training days. Use "Archive" on a day to keep it here for later.</div>` : archived.map(({d,di})=>{
+      const exs = normalizeExercises(d.exercises);
+      const info = supersetInfo(exs);
+      return `<details class="tr-archived-day">
+        <summary><span class="tr-arch-name">${escapeHtml(d.label||'Untitled day')}</span><span class="muted" style="font-size:11.5px;">${exs.length} exercise${exs.length===1?'':'s'}${d.archivedAt?' &middot; archived '+escapeHtml(d.archivedAt):''}</span>
+          <span class="tr-arch-actions"><button type="button" class="btn-sm btn-ghost" onclick="event.preventDefault();trRestoreDay('${c.id}',${di})">Restore</button><button type="button" class="btn-sm btn-ghost" style="color:var(--red);" onclick="event.preventDefault();trDeleteDay('${c.id}',${di})">Delete</button></span>
+        </summary>
+        <div class="ex-read-list">${exs.length===0?'<div class="muted" style="font-size:12.5px;">No exercises.</div>':exs.map((ex,ei)=>exerciseReadHTML(ex, info[ei])).join('')}</div>
+      </details>`;
     }).join('')}
+  </details>` : '';
+  return `<div class="training-grid" id="trainingSplitWrap">
+    ${active.map(dayCard).join('')}
   </div>
-  ${editable?`<div style="margin-top:14px;display:flex;gap:10px;"><button class="btn-sm btn-ghost" type="button" onclick="addTrainingDay('${c.id}')">+ Add Training Day</button><button class="btn" onclick="saveTrainingSplit('${c.id}')">Save Training Split</button></div>`:''}`;
+  ${editable?`<div style="margin-top:14px;display:flex;gap:10px;"><button class="btn-sm btn-ghost" type="button" onclick="addTrainingDay('${c.id}')">+ Add Training Day</button><button class="btn" onclick="saveTrainingSplit('${c.id}')">Save Training Split</button></div>`:''}
+  ${archiveSection}`;
 }
 // Copy whatever is currently typed in the editor into the in-memory model,
 // so structural changes (add/remove/link/reorder) never lose unsaved typing.
@@ -3009,8 +3039,10 @@ function syncTrainingFromDom(clientId){
   const c = getClient(clientId);
   const wrap = document.getElementById('trainingSplitWrap');
   if(!c || !wrap) return;
-  const split = [];
+  const split = c.trainingSplit.slice();
   Array.from(wrap.children).filter(el=>el.classList.contains('card')).forEach(card=>{
+    const idx = parseInt(card.dataset.dayIdx);
+    if(isNaN(idx) || !split[idx]) return;
     const exercises = [];
     card.querySelectorAll('.ex-block').forEach(b=>{
       exercises.push({
@@ -3020,7 +3052,7 @@ function syncTrainingFromDom(clientId){
         sets: Array.from(b.querySelectorAll('.set-row')).map(r=>({ type: r.dataset.type, reps: r.querySelector('.set-reps').value }))
       });
     });
-    split.push({ label: card.querySelector('.day-label').value, exercises });
+    split[idx] = Object.assign({}, split[idx], { label: card.querySelector('.day-label').value, exercises });
   });
   c.trainingSplit = split;
 }
@@ -3058,16 +3090,42 @@ function trSetCount(clientId, di, ei, n){
 function trToggleLink(clientId, di, ei){
   trMutate(clientId, split=>{ const ex = split[di].exercises[ei]; ex.linked = !ex.linked; });
 }
-async function saveTrainingSplit(clientId){
+async function trPersist(clientId, msg){
   const c = getClient(clientId);
-  syncTrainingFromDom(clientId);
-  const split = c.trainingSplit.map(d=>({
-    label: d.label,
-    exercises: d.exercises.filter(ex=>ex.name.trim()!=='')
+  const split = c.trainingSplit.map(d=>Object.assign({}, d, {
+    exercises: normalizeExercises(d.exercises).filter(ex=>ex.name.trim()!=='')
   }));
   const { error } = await sb.from('clients').update({ training_split: split }).eq('id', clientId);
-  if(error){ showToast('Could not save training split: '+error.message, true); return; }
-  c.trainingSplit = split; showToast('Training split saved');
+  if(error){ showToast('Could not save training split: '+error.message, true); return false; }
+  c.trainingSplit = split; showToast(msg||'Training split saved');
+  return true;
+}
+async function saveTrainingSplit(clientId){
+  syncTrainingFromDom(clientId);
+  await trPersist(clientId);
+  render();
+}
+async function trArchiveDay(clientId, di){
+  syncTrainingFromDom(clientId);
+  const d = getClient(clientId).trainingSplit[di];
+  d.archived = true; d.archivedAt = new Date().toISOString().slice(0,10);
+  await trPersist(clientId, 'Day moved to archive');
+  render();
+}
+async function trRestoreDay(clientId, di){
+  syncTrainingFromDom(clientId);
+  const d = getClient(clientId).trainingSplit[di];
+  d.archived = false; delete d.archivedAt;
+  await trPersist(clientId, 'Day restored');
+  render();
+}
+async function trDeleteDay(clientId, di){
+  syncTrainingFromDom(clientId);
+  const c = getClient(clientId);
+  const d = c.trainingSplit[di];
+  if(!confirm(`Permanently delete "${d.label||'this day'}"? This can't be undone. (Use Archive to keep it.)`)) return;
+  c.trainingSplit.splice(di,1);
+  await trPersist(clientId, 'Day deleted');
   render();
 }
 function addTrainingDay(clientId){
