@@ -158,6 +158,9 @@
   .exercise-read-reps{color:var(--accent2);font-weight:700;}
   .training-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;}
   @media(max-width:900px){.training-grid{grid-template-columns:1fr;}}
+  .copy-checks{display:flex;gap:18px;flex-wrap:wrap;}
+  .copy-checks label{display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;letter-spacing:0;color:var(--text);font-weight:600;margin:0;}
+  .copy-checks input{width:auto;}
   .day-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
   .day-head input{flex:1;min-width:0;}
   .tr-archive{margin-top:22px;border:1px solid var(--border);border-radius:12px;padding:10px 14px;background:var(--panel);}
@@ -801,10 +804,51 @@ async function loadAppData(){
 /* ======================================================================
    AUTH
    ====================================================================== */
+// Invite links now arrive as  ?token_hash=...&type=invite  and are only redeemed
+// when the person taps "Continue". Email scanners (Outlook, etc.) pre-open links
+// to check them, which used up the old one-time links before the client got there.
+function inviteLinkParams(){
+  const q = new URLSearchParams(window.location.search);
+  const th = q.get('token_hash');
+  return th ? { token_hash: th, type: q.get('type') || 'invite' } : null;
+}
+function renderInviteLanding(params){
+  document.getElementById('app').innerHTML = `
+  <div id="authScreen">
+    <div class="auth-box">
+      <div class="brand"><div class="brand-mark">PC</div><div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div></div>
+      <div class="auth-info">You've been invited by your coach. Tap Continue to set up your account.</div>
+      <div class="auth-error" id="authError" style="display:none;"></div>
+      <div class="row"><button class="btn" style="flex:1;" id="inviteContinueBtn" onclick="redeemInviteLink()">Continue</button></div>
+    </div>
+  </div>`;
+  window.__inviteParams = params;
+}
+async function redeemInviteLink(){
+  const params = window.__inviteParams;
+  const errEl = document.getElementById('authError');
+  const btn = document.getElementById('inviteContinueBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'One moment…'; }
+  const { data, error } = await sb.auth.verifyOtp({ token_hash: params.token_hash, type: params.type });
+  if(error || !data || !data.session){
+    if(errEl){ errEl.textContent = 'This invite link has expired or was already used. Ask your coach to send you a new invite.'; errEl.style.display='block'; }
+    if(btn){ btn.disabled = false; btn.textContent = 'Continue'; }
+    return;
+  }
+  window.history.replaceState({}, '', window.location.pathname);
+  session = data.session;
+  await loadProfileAndApp();
+}
 async function initAuth(){
+  const invite = inviteLinkParams();
+  if(invite){ renderInviteLanding(invite); return; }
+  const hashErr = new URLSearchParams((window.location.hash||'').replace(/^#/,'')).get('error_description');
   const { data:{ session:s } } = await sb.auth.getSession();
   session = s;
-  if(!session){ renderAuthScreen(); return; }
+  if(!session){
+    renderAuthScreen(hashErr ? 'That invite link has expired or was already used. Ask your coach to send you a new invite.' : undefined);
+    return;
+  }
   await loadProfileAndApp();
 }
 async function loadProfileAndApp(){
@@ -1214,11 +1258,17 @@ function openInviteForm(clientId){
     <div class="row" style="align-items:flex-end;">
       <div class="field"><label>Client's email</label><input type="email" id="inv_email" value="${escapeHtml(c.invitedEmail||'')}" placeholder="client@email.com"></div>
       <div class="field" style="flex:0 0 auto;">
-        <button type="button" class="btn btn-sm" id="inv_send_btn" onclick="sendClientInvite()">Send Invite</button>
+        <button type="button" class="btn btn-sm" id="inv_send_btn" onclick="sendClientInvite()">Send Invite Email</button>
+        <button type="button" class="btn-sm btn-ghost" id="inv_link_btn" onclick="getClientInviteLink()">Get Link Instead</button>
         <button type="button" class="btn-sm btn-ghost" onclick="document.getElementById('inviteFormWrap').innerHTML=''">Cancel</button>
       </div>
     </div>
+    <p class="muted" style="font-size:11.5px;margin:6px 0 0;">If the emailed link doesn't work (Outlook/Hotmail often opens links before the person does), use "Get Link Instead" and send it by text or WhatsApp.</p>
     <div class="auth-error" id="inv_error" style="display:none;"></div>
+    <div id="inv_link_out" style="display:none;margin-top:10px;">
+      <label>Invite link (works once)</label>
+      <div style="display:flex;gap:8px;"><input type="text" id="inv_link_val" readonly><button type="button" class="btn-sm" onclick="copyInviteLink()">Copy</button></div>
+    </div>
   </div>`;
 }
 async function sendClientInvite(){
@@ -1247,8 +1297,41 @@ async function sendClientInvite(){
   }catch(e){
     errEl.textContent = e.message; errEl.style.display='block';
   } finally {
-    if(btn){ btn.disabled = false; btn.textContent = 'Send Invite'; }
+    if(btn){ btn.disabled = false; btn.textContent = 'Send Invite Email'; }
   }
+}
+async function getClientInviteLink(){
+  const clientId = inviteFormClientId;
+  const email = document.getElementById('inv_email').value.trim();
+  const errEl = document.getElementById('inv_error');
+  errEl.style.display='none';
+  if(!email || !email.includes('@')){ errEl.textContent='Enter a valid email address.'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('inv_link_btn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try{
+    const { data:{ session:s } } = await sb.auth.getSession();
+    const res = await fetch('/.netlify/functions/invite-client', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+(s?s.access_token:'') },
+      body: JSON.stringify({ email, clientId, mode:'link' })
+    });
+    const result = await res.json().catch(()=>({}));
+    if(!res.ok || !result.link){ throw new Error(result.error || 'Could not create link'); }
+    document.getElementById('inv_link_val').value = result.link;
+    document.getElementById('inv_link_out').style.display = 'block';
+    const c = getClient(clientId);
+    if(c){ c.invitedEmail = email; c.inviteSentAt = new Date().toISOString(); }
+  }catch(e){
+    errEl.textContent = e.message; errEl.style.display='block';
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Get Link Instead'; }
+  }
+}
+function copyInviteLink(){
+  const el = document.getElementById('inv_link_val');
+  el.select();
+  try{ navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand('copy'); }
+  showToast('Link copied');
 }
 async function setClientArchived(clientId, archived){
   const c = getClient(clientId);
@@ -1538,14 +1621,88 @@ async function saveClientInfo(id){
   showToast('Client info saved');
   render();
 }
+/* ======================================================================
+   COPY THIS CLIENT'S SETUP TO ANOTHER CLIENT (use as a starting template)
+   ====================================================================== */
+function renderCopyToClientCard(c){
+  const others = clients.filter(x=>x.id!==c.id);
+  if(!others.length) return '';
+  const opts = others.slice().sort((a,b)=>(a.archived?1:0)-(b.archived?1:0)).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}${x.archived?' (archived)':''}</option>`).join('');
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Copy to another client</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Use ${escapeHtml(c.name)}'s setup as a starting point for another client, then adjust from there. This replaces what the other client currently has in the sections you tick.</p>
+    <div class="copy-checks">
+      <label><input type="checkbox" id="cpc_meal" checked> Meal plan</label>
+      <label><input type="checkbox" id="cpc_training" checked> Training split</label>
+      <label><input type="checkbox" id="cpc_cardio" checked> Cardio &amp; steps</label>
+      <label><input type="checkbox" id="cpc_ped" checked> PEDs &amp; supplements</label>
+    </div>
+    <div class="row" style="align-items:flex-end;margin-top:10px;">
+      <div class="field"><label>Copy to</label><select id="cpc_target">${opts}</select></div>
+      <div class="field" style="flex:0 0 auto;"><button type="button" class="btn btn-sm" id="cpc_btn" onclick="copyClientSetup('${c.id}')">Copy</button></div>
+    </div>
+  </div>`;
+}
+async function copyClientSetup(sourceId){
+  const src = getClient(sourceId);
+  const targetId = document.getElementById('cpc_target').value;
+  const tgt = getClient(targetId);
+  if(!src || !tgt) return;
+  const want = { meal: document.getElementById('cpc_meal').checked, training: document.getElementById('cpc_training').checked, cardio: document.getElementById('cpc_cardio').checked, ped: document.getElementById('cpc_ped').checked };
+  const names = [];
+  if(want.meal) names.push('meal plan'); if(want.training) names.push('training split'); if(want.cardio) names.push('cardio & steps'); if(want.ped) names.push('PEDs & supplements');
+  if(!names.length){ showToast('Tick at least one section to copy', true); return; }
+  if(!confirm(`Copy ${src.name}'s ${names.join(', ')} to ${tgt.name}?\n\nThis replaces ${tgt.name}'s current ${names.join(', ')}.`)) return;
+  const btn = document.getElementById('cpc_btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Copying…'; }
+  const clone = v => JSON.parse(JSON.stringify(v));
+  const upd = {};
+  if(want.meal){
+    upd.meal_plan = clone(src.mealPlan);
+    upd.meal_day_types = src.mealDayTypes ? clone(src.mealDayTypes) : [];
+    upd.client_meal_log = { training:[], rest:[], refeed:[] };
+  }
+  if(want.training) upd.training_split = clone((src.trainingSplit||[]).filter(d=>!d.archived));
+  if(want.cardio) upd.cardio_notes = src.cardioNotes || '';
+  if(want.ped) upd.pedsupp_notes = src.pedSuppNotes || '';
+  try{
+    if(Object.keys(upd).length){
+      const { error } = await sb.from('clients').update(upd).eq('id', targetId);
+      if(error) throw error;
+    }
+    let newPeds = null, newSupps = null;
+    if(want.ped){
+      const strip = r => { const o = { client_id: targetId }; ['date','drug','dose','frequency','timing','phase','notes','sort_order'].forEach(k=>{ if(r[k]!==undefined) o[k]=r[k]; }); return o; };
+      const pedRows = (src.pedLogs||[]).map(strip), suppRows = (src.supplementLogs||[]).map(strip);
+      if(pedRows.length){ const { data, error } = await sb.from('ped_logs').insert(pedRows).select(); if(error) throw error; newPeds = data; }
+      if(suppRows.length){ const { data, error } = await sb.from('supplement_logs').insert(suppRows).select(); if(error) throw error; newSupps = data; }
+      // only after the copies are safely in, remove the target's previous entries
+      const oldPedIds = (tgt.pedLogs||[]).map(x=>x.id), oldSuppIds = (tgt.supplementLogs||[]).map(x=>x.id);
+      if(oldPedIds.length){ const { error } = await sb.from('ped_logs').delete().in('id', oldPedIds); if(error) throw error; }
+      if(oldSuppIds.length){ const { error } = await sb.from('supplement_logs').delete().in('id', oldSuppIds); if(error) throw error; }
+    }
+    if(want.meal){ tgt.mealPlan = clone(src.mealPlan); tgt.mealDayTypes = src.mealDayTypes ? clone(src.mealDayTypes) : null; tgt.clientMealLog = { training:[], rest:[], refeed:[] }; }
+    if(want.training) tgt.trainingSplit = clone((src.trainingSplit||[]).filter(d=>!d.archived));
+    if(want.cardio) tgt.cardioNotes = src.cardioNotes || '';
+    if(want.ped){ tgt.pedSuppNotes = src.pedSuppNotes || ''; tgt.pedLogs = newPeds || []; tgt.supplementLogs = newSupps || []; }
+    showToast(`Copied to ${tgt.name}`);
+  }catch(e){
+    showToast('Could not copy: '+(e.message||e), true);
+  }
+  render();
+}
+
 function renderOverviewTab(c){
   const lc=latestCheckin(c); const delta=weightChange(c);
   if(!lc){
     return `${renderClientInfoCard(c)}
+    ${renderCopyToClientCard(c)}
     <div class="card"><div class="empty">No check-ins submitted yet. ${c.hasAccount ? 'Once they log in, they can submit their first PBP Check-In.' : "Send this client an invite from All Clients so they can create their login and submit their first PBP Check-In."}</div></div>`;
   }
   return `
   ${renderClientInfoCard(c)}
+  ${renderCopyToClientCard(c)}
   <div class="grid cards-3" style="margin-bottom:16px;">
     <div class="card"><div class="stat-label">Current Weight</div><div class="stat-value">${hasWeight(lc)?lc.weight:'—'} kg</div><div class="stat-delta ${delta<0?'delta-pos':'delta-neg'}">${delta>0?'+':''}${delta} kg since start</div></div>
     <div class="card"><div class="stat-label">Overall Adherence (last check-in)</div><div class="stat-value">${(lc.overallAdherence||0).toFixed(1)}/5</div></div>

@@ -55,7 +55,7 @@ exports.handler = async (event) => {
 
   const { data: clientRow, error: clientErr } = await admin
     .from('clients')
-    .select('id')
+    .select('*')
     .eq('id', clientId)
     .single();
   if (clientErr || !clientRow) {
@@ -63,8 +63,28 @@ exports.handler = async (event) => {
   }
 
   const siteUrl = process.env.SITE_URL || `https://${event.headers.host}`;
+  const meta = { role: 'client', client_id: clientId };
+  if (clientRow.org_id) meta.org_id = clientRow.org_id;
+
+  if (body.mode === 'link') {
+    // No email is sent: return a one-time link the coach can send themselves
+    // (text/WhatsApp). Avoids email scanners using the link up before the client does.
+    let type = 'invite';
+    let result = await admin.auth.admin.generateLink({ type, email, options: { data: meta, redirectTo: siteUrl } });
+    if (result.error) {
+      type = 'magiclink';
+      result = await admin.auth.admin.generateLink({ type, email, options: { data: meta, redirectTo: siteUrl } });
+    }
+    if (result.error || !result.data || !result.data.properties) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: (result.error && result.error.message) || 'Could not create link' }) };
+    }
+    const link = `${siteUrl}/?token_hash=${encodeURIComponent(result.data.properties.hashed_token)}&type=${type}`;
+    await admin.from('clients').update({ invited_email: email, invite_sent_at: new Date().toISOString() }).eq('id', clientId);
+    return { statusCode: 200, headers, body: JSON.stringify({ ok: true, link }) };
+  }
+
   const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { role: 'client', client_id: clientId },
+    data: meta,
     redirectTo: siteUrl
   });
   if (inviteErr) {
