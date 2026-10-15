@@ -158,6 +158,13 @@
   .exercise-read-reps{color:var(--accent2);font-weight:700;}
   .training-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;}
   @media(max-width:900px){.training-grid{grid-template-columns:1fr;}}
+  .bell-btn{position:relative;background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:10px;width:38px;height:38px;font-size:17px;cursor:pointer;}
+  .bell-badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;border-radius:999px;font-size:10.5px;font-weight:700;min-width:18px;height:18px;line-height:18px;text-align:center;padding:0 4px;}
+  .notif-panel{position:absolute;right:0;top:46px;width:min(360px,92vw);max-height:420px;overflow-y:auto;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.45);z-index:60;}
+  .notif-head{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);}
+  .notif-item{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;}
+  .notif-item:hover{background:var(--panel2);}
+  .notif-item.unread{border-left:3px solid var(--accent);background:rgba(255,92,53,.06);}
   .copy-checks{display:flex;gap:18px;flex-wrap:wrap;}
   .copy-checks label{display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;letter-spacing:0;color:var(--text);font-weight:600;margin:0;}
   .copy-checks input{width:auto;}
@@ -673,7 +680,7 @@ if(typeof window.supabase === 'undefined'){
   document.getElementById('app').innerHTML = '<div class="loading-screen">Could not load the Supabase library (check your internet connection) — please refresh the page.</div>';
   throw new Error('supabase-js failed to load');
 }
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 let clients = [];
 let state = { role:null, currentClientId:null, page:'dashboard', detailTab:'overview', clientListTab:'active' };
@@ -706,7 +713,7 @@ function rowToClient(row){
     mealPlan: { training:[], rest:[], refeed:[], ...(row.meal_plan||{}) },
     clientMealLog: { training:[], rest:[], refeed:[], ...(row.client_meal_log||{}) },
     mealDayTypes: (row.meal_day_types && row.meal_day_types.length) ? row.meal_day_types : null,
-    archived: !!row.archived,
+    archived: !!row.archived, orgId: row.org_id || null,
     trainingSplit: row.training_split || [], schedule: row.schedule || [], cardioNotes: row.cardio_notes || '',
     pedSuppNotes: row.pedsupp_notes || '',
     invitedEmail: row.invited_email || null, inviteSentAt: row.invite_sent_at || null, hasAccount: false,
@@ -715,11 +722,35 @@ function rowToClient(row){
 }
 function checkinRowToObj(row){ return { id: row.id, week: row.week, date: row.date, coachReviewed: !!row.coach_reviewed, messages: row.messages || [], ...row.payload }; }
 
+// Signs many storage paths at once. If the browser's own request is refused
+// (storage access rules), falls back to a server function that checks the caller
+// is allowed to see that client's files and signs them with admin rights.
+async function resolveSignedUrls(bucket, paths){
+  const out = {};
+  const list = Array.from(new Set((paths||[]).filter(Boolean)));
+  if(!list.length) return out;
+  try{
+    const { data } = await sb.storage.from(bucket).createSignedUrls(list, 3600);
+    (data||[]).forEach(d=>{ if(d && d.signedUrl && !d.error) out[d.path] = d.signedUrl; });
+  }catch(e){ console.warn('signed urls error', bucket, e); }
+  const missing = list.filter(p=>!out[p]);
+  if(missing.length){
+    try{
+      const { data:{ session:s } } = await sb.auth.getSession();
+      const res = await fetch('/.netlify/functions/sign-urls', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+(s?s.access_token:'') },
+        body: JSON.stringify({ bucket, paths: missing })
+      });
+      if(res.ok){ const j = await res.json(); Object.assign(out, j.urls||{}); }
+    }catch(e){ console.warn('sign-urls fallback failed', e); }
+  }
+  return out;
+}
 async function resolveSignedUrl(bucket, path){
   if(!path) return null;
-  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 3600);
-  if(error){ console.warn('signed url error', bucket, path, error); return null; }
-  return data.signedUrl;
+  const m = await resolveSignedUrls(bucket, [path]);
+  return m[path] || null;
 }
 
 async function fetchClientFull(clientId){
@@ -729,24 +760,28 @@ async function fetchClientFull(clientId){
 
   const { data: cirows, error: cierr } = await sb.from('checkins').select('*').eq('client_id', clientId).order('week');
   if(cierr) throw cierr;
-  client.checkins = await Promise.all((cirows||[]).map(async row=>{
+  const asArray = v => Array.isArray(v) ? v : (v ? [v] : []); // backward-compat with old single-photo checkins
+  const allPaths = [];
+  (cirows||[]).forEach(row=>{ const ph = (row.payload && row.payload.photos) || {}; ['front','side','back'].forEach(k=>asArray(ph[k]).forEach(p=>allPaths.push(p))); });
+  const photoUrlMap = await resolveSignedUrls('progress-photos', allPaths);
+  client.checkins = (cirows||[]).map(row=>{
     const ci = checkinRowToObj(row);
     const paths = ci.photos || {front:[],side:[],back:[]};
-    const asArray = v => Array.isArray(v) ? v : (v ? [v] : []); // backward-compat with old single-photo checkins
-    ci.photos = {
-      front: await Promise.all(asArray(paths.front).map(p=>resolveSignedUrl('progress-photos', p))),
-      side: await Promise.all(asArray(paths.side).map(p=>resolveSignedUrl('progress-photos', p))),
-      back: await Promise.all(asArray(paths.back).map(p=>resolveSignedUrl('progress-photos', p)))
-    };
+    ci.photoPaths = { front: asArray(paths.front), side: asArray(paths.side), back: asArray(paths.back) };
+    let missing = 0;
+    const toUrls = arr => asArray(arr).map(p=>{ const u = photoUrlMap[p]; if(!u) missing++; return u; }).filter(Boolean);
+    ci.photos = { front: toUrls(paths.front), side: toUrls(paths.side), back: toUrls(paths.back) };
+    ci.photosMissing = missing;
     return ci;
-  }));
+  });
 
   const { data: trows, error: terr } = await sb.from('test_results').select('*').eq('client_id', clientId).order('date');
   if(terr) throw terr;
-  client.testResults = await Promise.all((trows||[]).map(async row=>({
+  const testUrlMap = await resolveSignedUrls('test-results', (trows||[]).map(r=>r.file_path));
+  client.testResults = (trows||[]).map(row=>({
     id: row.id, date: row.date, type: row.type, label: row.label, notes: row.notes,
-    fileName: row.file_name, fileDataUrl: await resolveSignedUrl('test-results', row.file_path)
-  })));
+    fileName: row.file_name, fileDataUrl: testUrlMap[row.file_path] || null
+  }));
 
   const { data: plrows, error: plerr } = await sb.from('ped_logs').select('*').eq('client_id', clientId).order('sort_order');
   if(plerr) throw plerr;
@@ -858,6 +893,7 @@ async function loadProfileAndApp(){
     return;
   }
   myProfile = prow;
+  if(session.user.email && prow.email !== session.user.email){ sb.rpc('sync_my_email').then(()=>{ myProfile.email = session.user.email; }, ()=>{}); }
   state.role = prow.role;
   state.page = prow.role==='coach' ? 'dashboard' : 'client-dashboard';
   document.getElementById('app').innerHTML = `<div class="loading-screen">Loading your data…</div>`;
@@ -872,14 +908,22 @@ async function loadProfileAndApp(){
     return;
   }
   render();
+  startNotifPolling();
 }
 async function handleSignIn(){
   const email = document.getElementById('auth_email').value.trim();
   const password = document.getElementById('auth_password').value;
   const errEl = document.getElementById('authError');
   errEl.style.display='none';
+  if(!email || !password){ errEl.textContent='Enter your email and password.'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('signInBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Signing in…'; }
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  if(error){ errEl.textContent = error.message; errEl.style.display='block'; return; }
+  if(error){
+    errEl.textContent = error.message; errEl.style.display='block';
+    if(btn){ btn.disabled = false; btn.textContent = 'Sign In'; }
+    return;
+  }
   session = data.session;
   await loadProfileAndApp();
 }
@@ -908,6 +952,7 @@ async function handleSignUp(){
 }
 async function handleSignOut(){
   await sb.auth.signOut();
+  stopNotifPolling();
   session=null; myProfile=null; myOrg=null; clients=[]; coachOrgs=[];
   document.documentElement.style.removeProperty('--accent');
   document.documentElement.style.removeProperty('--accent2');
@@ -921,12 +966,14 @@ function renderAuthScreen(infoMsg){
       <div class="brand"><div class="brand-mark">PC</div><div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div></div>
       <div class="auth-error" id="authError" style="display:none;"></div>
       ${infoMsg?`<div class="auth-info">${infoMsg}</div>`:''}
-      <div class="field"><label>Email</label><input type="text" id="auth_email"></div>
-      <div class="field"><label>Password</label><input type="password" id="auth_password" placeholder="6+ characters"></div>
-      <div class="muted" style="font-size:11.5px;margin:2px 0 14px;">Clients and coaches: use the invite link emailed to you instead of signing up here.</div>
-      <div class="row">
-        <button class="btn" style="flex:1;" onclick="handleSignIn()">Sign In</button>
-      </div>
+      <form id="signInForm" onsubmit="event.preventDefault();handleSignIn();return false;" autocomplete="on">
+        <div class="field"><label>Email</label><input type="email" id="auth_email" name="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></div>
+        <div class="field"><label>Password</label><input type="password" id="auth_password" name="password" autocomplete="current-password" placeholder="Your password"></div>
+        <div class="muted" style="font-size:11.5px;margin:2px 0 14px;">Clients and coaches: use the invite link you were sent instead of signing up here. You'll stay signed in on this device.</div>
+        <div class="row">
+          <button class="btn" type="submit" style="flex:1;" id="signInBtn">Sign In</button>
+        </div>
+      </form>
     </div>
   </div>`;
 }
@@ -965,11 +1012,14 @@ function renderCompleteProfileScreen(){
         <div class="brand"><div class="brand-mark">PC</div><div><div class="brand-name">PeakCheck</div><div class="brand-sub">Client Check-In Tracker</div></div></div>
         <div class="auth-info">You've been invited by your coach — set a password to finish creating your account.</div>
         <div class="auth-error" id="cpError" style="display:none;"></div>
-        <div class="field"><label>Password</label><input type="password" id="cp_password" placeholder="6+ characters"></div>
-        <div class="field"><label>Confirm password</label><input type="password" id="cp_password2" placeholder="6+ characters"></div>
-        <div class="row">
-          <button class="btn" style="flex:1;" onclick="handleAcceptInvite()">Get Started</button>
-        </div>
+        <form onsubmit="event.preventDefault();handleAcceptInvite();return false;" autocomplete="on">
+          <input type="email" value="${escapeHtml(session.user.email||'')}" autocomplete="username" readonly style="display:none;">
+          <div class="field"><label>Password</label><input type="password" id="cp_password" autocomplete="new-password" placeholder="6+ characters"></div>
+          <div class="field"><label>Confirm password</label><input type="password" id="cp_password2" autocomplete="new-password" placeholder="6+ characters"></div>
+          <div class="row">
+            <button class="btn" type="submit" style="flex:1;">Get Started</button>
+          </div>
+        </form>
       </div>
     </div>`;
     return;
@@ -1020,6 +1070,7 @@ function render(){
     </div>
   `;
   if(document.getElementById('weightChart')) initWeightChart();
+  if(state.editingCheckinId && state.page==='client-checkin') prefillCheckinEdit();
 }
 
 function toggleSidebar(){
@@ -1035,22 +1086,169 @@ function closeSidebar(){
   if(bd) bd.classList.remove('show');
 }
 
-function setPage(p){ state.page=p; render(); }
+function setPage(p){ if(p!=='client-checkin') state.editingCheckinId=null; state.page=p; render(); }
 function setRole(r){ state.role=r; state.page = r==='coach' ? 'dashboard' : 'client-dashboard'; render(); }
 function selectClient(id){ state.currentClientId=id; if(state.role==='coach') state.page='client-detail'; render(); }
+
+/* ======================================================================
+   MY ACCOUNT (coach + client): change email / password
+   ====================================================================== */
+function renderAccountPage(){
+  const email = (session && session.user && session.user.email) || (myProfile && myProfile.email) || '';
+  return `
+  <div class="grid cards-2" style="align-items:start;">
+    <div class="card">
+      <h3>Email address</h3>
+      <p class="muted" style="font-size:12.5px;margin-top:0;">Signed in as <b style="color:var(--text);">${escapeHtml(email)}</b></p>
+      <form onsubmit="event.preventDefault();changeAccountEmail();return false;" autocomplete="on">
+        <div class="field"><label>New email</label><input type="email" id="acct_email" autocomplete="email" autocapitalize="none" placeholder="new@email.com"></div>
+        <div class="auth-error" id="acct_email_err" style="display:none;"></div>
+        <div class="auth-info" id="acct_email_ok" style="display:none;"></div>
+        <button class="btn btn-sm" type="submit" id="acct_email_btn">Update email</button>
+        <p class="muted" style="font-size:11.5px;margin:10px 0 0;">We'll send a confirmation link to the new address. Your email only changes once you tap it.</p>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Password</h3>
+      <form onsubmit="event.preventDefault();changeAccountPassword();return false;" autocomplete="on">
+        <input type="email" value="${escapeHtml(email)}" autocomplete="username" readonly style="display:none;">
+        <div class="field"><label>New password</label><input type="password" id="acct_pw" autocomplete="new-password" placeholder="6+ characters"></div>
+        <div class="field"><label>Confirm new password</label><input type="password" id="acct_pw2" autocomplete="new-password" placeholder="6+ characters"></div>
+        <div class="auth-error" id="acct_pw_err" style="display:none;"></div>
+        <div class="auth-info" id="acct_pw_ok" style="display:none;"></div>
+        <button class="btn btn-sm" type="submit" id="acct_pw_btn">Update password</button>
+      </form>
+    </div>
+  </div>`;
+}
+function acctMsg(id, text, isErr){
+  ['err','ok'].forEach(k=>{ const el=document.getElementById(id+'_'+k); if(el) el.style.display='none'; });
+  const el = document.getElementById(id+'_'+(isErr?'err':'ok'));
+  if(el){ el.textContent = text; el.style.display='block'; }
+}
+async function changeAccountEmail(){
+  const email = document.getElementById('acct_email').value.trim();
+  if(!email || !email.includes('@')){ acctMsg('acct_email','Enter a valid email address.',true); return; }
+  const btn = document.getElementById('acct_email_btn'); btn.disabled = true; btn.textContent = 'Sending…';
+  const { error } = await sb.auth.updateUser({ email }, { emailRedirectTo: window.location.origin });
+  btn.disabled = false; btn.textContent = 'Update email';
+  if(error){ acctMsg('acct_email', error.message, true); return; }
+  acctMsg('acct_email', `Check ${email} for a confirmation link. Your sign-in email changes after you tap it.`, false);
+}
+async function changeAccountPassword(){
+  const pw = document.getElementById('acct_pw').value, pw2 = document.getElementById('acct_pw2').value;
+  if(!pw || pw.length<6){ acctMsg('acct_pw','Enter a password (6+ characters).',true); return; }
+  if(pw!==pw2){ acctMsg('acct_pw','Passwords do not match.',true); return; }
+  const btn = document.getElementById('acct_pw_btn'); btn.disabled = true; btn.textContent = 'Saving…';
+  const { error } = await sb.auth.updateUser({ password: pw });
+  btn.disabled = false; btn.textContent = 'Update password';
+  if(error){ acctMsg('acct_pw', error.message, true); return; }
+  document.getElementById('acct_pw').value=''; document.getElementById('acct_pw2').value='';
+  acctMsg('acct_pw','Password updated.',false);
+}
+
+/* ======================================================================
+   NOTIFICATIONS (in-app bell) — coach sees client activity, clients see
+   coach activity. Stored in the notifications table.
+   ====================================================================== */
+let notifications = [];
+let notifOpen = false;
+let notifTimer = null;
+function notifUnreadCount(){ return notifications.filter(n=>!n.read).length; }
+function notifTimeAgo(iso){
+  const t = new Date(iso).getTime(); if(isNaN(t)) return '';
+  const m = Math.round((Date.now()-t)/60000);
+  if(m<1) return 'just now'; if(m<60) return m+'m ago';
+  const h = Math.round(m/60); if(h<24) return h+'h ago';
+  const d = Math.round(h/24); return d+'d ago';
+}
+function renderBell(){
+  const n = notifUnreadCount();
+  return `
+  <button type="button" class="bell-btn" onclick="toggleNotifPanel(event)" aria-label="Notifications">&#128276;${n?`<span class="bell-badge">${n>9?'9+':n}</span>`:''}</button>
+  ${notifOpen ? `
+  <div class="notif-panel">
+    <div class="notif-head"><b>Notifications</b>${n?`<button type="button" class="btn-sm btn-ghost" onclick="markAllNotificationsRead()">Mark all read</button>`:''}</div>
+    ${notifications.length===0 ? `<div class="muted" style="padding:16px;font-size:12.5px;">Nothing yet. You'll see updates here.</div>` : notifications.map(x=>`
+    <div class="notif-item${x.read?'':' unread'}" onclick="openNotification('${x.id}')">
+      <div>${escapeHtml(x.message)}</div>
+      <div class="muted" style="font-size:11px;margin-top:2px;">${notifTimeAgo(x.created_at)}</div>
+    </div>`).join('')}
+  </div>` : ''}`;
+}
+function refreshBell(){ const w = document.getElementById('bellWrap'); if(w) w.innerHTML = renderBell(); }
+function toggleNotifPanel(e){ if(e) e.stopPropagation(); notifOpen = !notifOpen; refreshBell(); if(notifOpen) loadNotifications(); }
+document.addEventListener('click', e=>{ if(notifOpen && !(e.target.closest && e.target.closest('#bellWrap'))){ notifOpen = false; refreshBell(); } });
+async function loadNotifications(){
+  if(!myProfile || !state.role) return;
+  const role = state.role==='coach' ? 'coach' : 'client';
+  try{
+    let q = sb.from('notifications').select('*').eq('recipient_role', role).order('created_at', { ascending:false }).limit(40);
+    if(role==='client' && myProfile.client_id) q = q.eq('client_id', myProfile.client_id);
+    const { data, error } = await q;
+    if(error){ console.warn('notifications:', error.message); return; }
+    const before = notifUnreadCount() + ':' + notifications.length;
+    notifications = data || [];
+    if(before !== notifUnreadCount() + ':' + notifications.length || notifOpen) refreshBell();
+  }catch(e){ console.warn('notifications', e); }
+}
+function startNotifPolling(){
+  if(notifTimer) clearInterval(notifTimer);
+  loadNotifications();
+  notifTimer = setInterval(()=>{ if(!document.hidden) loadNotifications(); }, 45000);
+}
+function stopNotifPolling(){ if(notifTimer){ clearInterval(notifTimer); notifTimer = null; } notifications = []; notifOpen = false; }
+async function markAllNotificationsRead(){
+  const ids = notifications.filter(n=>!n.read).map(n=>n.id);
+  if(!ids.length) return;
+  notifications.forEach(n=>{ n.read = true; }); refreshBell();
+  try{ await sb.from('notifications').update({ read:true }).in('id', ids); }catch(e){ console.warn(e); }
+}
+async function openNotification(id){
+  const n = notifications.find(x=>x.id===id); if(!n) return;
+  if(!n.read){ n.read = true; try{ await sb.from('notifications').update({ read:true }).eq('id', id); }catch(e){} }
+  notifOpen = false;
+  if(state.role==='coach'){
+    if(n.client_id && getClient(n.client_id)){
+      state.currentClientId = n.client_id; state.page = 'client-detail';
+      state.detailTab = (n.type||'').startsWith('checkin') || n.type==='message' ? 'history' : 'overview';
+    }
+  } else {
+    state.editingCheckinId = null;
+    state.page = n.page || 'client-dashboard';
+  }
+  render();
+}
+async function notifyCoaches(clientId, type, message){
+  const c = getClient(clientId);
+  try{ await sb.from('notifications').insert({ recipient_role:'coach', client_id: clientId, org_id: c ? (c.orgId||null) : null, type, message, page:'history' }); }
+  catch(e){ console.warn('notify', e); }
+}
+// collapse=true: if there's already an unread note of this type for the client, refresh it instead of piling up
+async function notifyClient(clientId, type, message, page, collapse){
+  const c = getClient(clientId);
+  try{
+    if(collapse !== false){
+      const { data: ex } = await sb.from('notifications').select('id').eq('recipient_role','client').eq('client_id',clientId).eq('type',type).eq('read',false).limit(1);
+      if(ex && ex.length){ await sb.from('notifications').update({ message, created_at: new Date().toISOString() }).eq('id', ex[0].id); return; }
+    }
+    await sb.from('notifications').insert({ recipient_role:'client', client_id: clientId, org_id: c ? (c.orgId||null) : null, type, message, page: page||'client-dashboard' });
+  }catch(e){ console.warn('notify', e); }
+}
 
 /* ======================================================================
    SIDEBAR / TOPBAR
    ====================================================================== */
 function renderSidebar(){
   const coachLinks = [ ['dashboard','&#9638;','Dashboard'], ['clients','&#9776;','All Clients'], ['fooddb','&#127859;','Food Database'], ['peddb','&#8853;','PED Database'], ['suppdb','&#128138;','Supplement Database'], ['checkinform','&#128203;','Check-In Form'], ['dailyfields','&#128202;','Daily Tracker Fields'] ];
+  coachLinks.push(['account','&#9881;','My Account']);
   if(myProfile && myProfile.is_owner) coachLinks.push(['coaches','&#128101;','Coaches']);
   const clientLinks = [
     ['client-dashboard','&#9638;','My Dashboard'], ['client-checkin','&#128203;','PBP Check-In'],
     ['client-history','&#128337;','Check-In History'], ['client-photos','&#9638;','Progress Photos'],
     ['client-meal','&#9679;','Meal Plan'], ['client-training','&#9650;','Training Split'],
     ['client-schedule','&#9689;','Schedule'], ['client-cardio','&#128694;','Cardio & Steps'], ['client-pedsupps','&#8853;','PED & Supplements'],
-    ['client-tests','&#128193;','Test Results']
+    ['client-tests','&#128193;','Test Results'], ['client-daily','&#128202;','Daily Tracker'], ['account','&#9881;','My Account']
   ];
   const links = state.role==='coach' ? coachLinks : clientLinks;
   const linkHtml = links.map(([p,icon,label])=>`
@@ -1058,7 +1256,7 @@ function renderSidebar(){
 
   let detailNav='';
   if(state.role==='coach' && state.page==='client-detail'){
-    const tabs=[['overview','Overview'],['history','Check-In History'],['photos','Photos'],['meal','Meal Plan'],['training','Training Split'],['schedule','Schedule'],['cardio','Cardio & Steps'],['pedsupps','PED & Supplements'],['tests','Test Results'],['notes','Coach Notes']];
+    const tabs=[['overview','Overview'],['history','Check-In History'],['daily','Daily Tracker'],['photos','Photos'],['meal','Meal Plan'],['training','Training Split'],['schedule','Schedule'],['cardio','Cardio & Steps'],['pedsupps','PED & Supplements'],['tests','Test Results'],['notes','Coach Notes']];
     detailNav = `<div class="nav-section-label">Client View</div>` + tabs.map(([t,label])=>`
       <div class="navlink ${state.detailTab===t?'active':''}" onclick="state.detailTab='${t}';render();" style="font-size:12.5px;">${label}</div>`).join('');
   }
@@ -1073,7 +1271,7 @@ function renderSidebar(){
     ${linkHtml}
     ${detailNav}
     <div class="sidebar-footer">
-      <div class="muted" style="font-size:10.5px;text-align:center;margin-bottom:2px;word-break:break-all;">${myProfile?myProfile.email:''}</div>
+      <div class="muted" style="font-size:10.5px;text-align:center;margin-bottom:2px;word-break:break-all;cursor:pointer;" onclick="setPage('account')" title="My account">${myProfile?myProfile.email:''}</div>
       <button class="btn btn-ghost btn-sm" onclick="handleSignOut()">Sign Out</button>
     </div>
   </div>`;
@@ -1090,10 +1288,11 @@ function renderTopbar(){
     else if(state.page==='checkinform'){ title='Check-In Form'; sub='Shared question list used on every client\'s weekly check-in'; }
     else if(state.page==='dailyfields'){ title='Daily Tracker Fields'; sub='Shared column set used in every client\'s daily tracker'; }
     else if(state.page==='coaches'){ title='Coaches'; sub='Coach accounts on this platform'; }
+    else if(state.page==='account'){ title='My Account'; sub='Email and password'; }
     else if(state.page==='client-detail'){ const c=getClient(state.currentClientId); title=c?c.name:''; sub=c?c.goal:''; }
   } else {
     const c=getClient(state.currentClientId);
-    const map={'client-dashboard':'My Dashboard','client-checkin':'PBP Check-In','client-history':'Check-In History','client-photos':'Progress Photos','client-meal':'My Meal Plan','client-training':'My Training Split','client-schedule':'My Schedule','client-cardio':'Cardio & Steps','client-pedsupps':'My PED & Supplements','client-tests':'My Test Results'};
+    const map={'client-dashboard':'My Dashboard','client-checkin':'PBP Check-In','client-history':'Check-In History','client-photos':'Progress Photos','client-meal':'My Meal Plan','client-training':'My Training Split','client-schedule':'My Schedule','client-cardio':'Cardio & Steps','client-pedsupps':'My PED & Supplements','client-tests':'My Test Results','client-daily':'Daily Tracker','account':'My Account'};
     title = map[state.page] || 'Dashboard';
     sub = c ? c.goal : '';
   }
@@ -1111,6 +1310,7 @@ function renderTopbar(){
     </div>
     <div class="topbar-right">
       ${archiveToggle}
+      <div id="bellWrap" style="position:relative;">${renderBell()}</div>
       <div class="avatar" style="background:${activeClient?activeClient.color:'#555'}">${activeClient?activeClient.initials:'--'}</div>
     </div>
   </div>`;
@@ -1128,6 +1328,7 @@ function renderPage(){
     if(state.page==='suppdb') return renderSupplementDbPage(true);
     if(state.page==='checkinform') return renderCheckinFormPage();
     if(state.page==='dailyfields') return renderDailyFieldsPage();
+    if(state.page==='account') return renderAccountPage();
     if(state.page==='coaches') return myProfile && myProfile.is_owner ? renderCoachesPage() : renderCoachDashboard();
     if(state.page==='client-detail') return clients.length ? renderClientDetail() : `<div class="empty">No clients yet — add one from All Clients.</div>`;
     return renderCoachDashboard();
@@ -1145,6 +1346,8 @@ function renderPage(){
       'client-cardio': ()=>renderCardioPlanBlock(c, false),
       'client-pedsupps': ()=>renderPedSupplementsTab(c, false),
       'client-tests': ()=>renderTestResultsBlock(c, true),
+      'client-daily': ()=>renderDailyTrackerPage(c, false),
+      'account': ()=>renderAccountPage(),
     };
     return (map[state.page]||map['client-dashboard'])();
   }
@@ -1551,6 +1754,7 @@ function renderClientDetail(){
   const c=getClient(state.currentClientId);
   const map={
     overview: ()=>renderOverviewTab(c),
+    daily: ()=>renderDailyTrackerPage(c, true),
     history: ()=>renderCheckinsHistoryTab(c, true),
     photos: ()=>renderPhotosTab(c),
     meal: ()=>renderMealPlanBlock(c, true),
@@ -1686,6 +1890,7 @@ async function copyClientSetup(sourceId){
     if(want.training) tgt.trainingSplit = clone((src.trainingSplit||[]).filter(d=>!d.archived));
     if(want.cardio) tgt.cardioNotes = src.cardioNotes || '';
     if(want.ped){ tgt.pedSuppNotes = src.pedSuppNotes || ''; tgt.pedLogs = newPeds || []; tgt.supplementLogs = newSupps || []; }
+    notifyClient(targetId, 'plan_copy', 'Your coach set up your plan', 'client-dashboard');
     showToast(`Copied to ${tgt.name}`);
   }catch(e){
     showToast('Could not copy: '+(e.message||e), true);
@@ -1780,6 +1985,7 @@ function renderCheckinsHistoryTab(c, isCoach){
     <details class="card collapsible" style="margin-top:12px;">
       <summary>Check-In ${ci.week} — ${ci.date}${ci.date?` — ${new Date(ci.date+'T00:00:00').toLocaleDateString(undefined,{weekday:'long'})}`:''} ${!ci.coachReviewed?'<span class="badge badge-amber" style="margin-left:8px;">Needs review</span>':''}</summary>
       <div style="margin-top:12px;">${renderDailyTable(ci.days, false)}</div>
+      ${!isCoach ? (ci.coachReviewed ? `<div class="muted" style="font-size:12px;margin-top:12px;">&#128274; Locked &mdash; your coach has reviewed this check-in.</div>` : `<div style="margin-top:12px;"><button type="button" class="btn-sm btn-ghost" onclick="startEditCheckin('${ci.id}')">&#9998; Edit this check-in</button> <span class="muted" style="font-size:11.5px;margin-left:6px;">You can edit until your coach reviews it.</span></div>`) : ''}
       <div class="qa-card" style="margin-top:14px;">
         ${CHECKIN_QUESTIONS.map(q=>{
           const v = ci[q.key]; if(v===undefined||v==='') return '';
@@ -1788,6 +1994,7 @@ function renderCheckinsHistoryTab(c, isCoach){
       </div>
       <div class="card" style="margin-top:14px;">
         <h3 style="margin-bottom:10px;">Progress Photos</h3>
+        ${ci.photosMissing ? `<div class="flag-row" style="margin-bottom:10px;">&#9888; ${ci.photosMissing} photo${ci.photosMissing===1?'':'s'} from this check-in couldn't be loaded. If this keeps happening, ask the client to re-upload.</div>` : ''}
         <div class="grid cards-3">
           ${photoBox('Front', pg.front, pg.gid, 0)}
           ${photoBox('Side', pg.side, pg.gid, pg.front.length)}
@@ -1834,6 +2041,8 @@ async function sendCheckinMessage(clientId, checkinId, sender){
   if(error){ showToast('Could not send message: '+error.message, true); return; }
   ci.messages = newMessages;
   if(sender==='coach') ci.coachReviewed = true;
+  if(sender==='coach') notifyClient(clientId, 'checkin_reviewed', `Your coach reviewed check-in ${ci.week} and left feedback`, 'client-history', false);
+  else notifyCoaches(clientId, 'message', `${c.name} replied on check-in ${ci.week}`);
   showToast('Message sent');
   render();
 }
@@ -1844,13 +2053,29 @@ async function markCheckinReviewed(clientId, checkinId){
   const { error } = await sb.from('checkins').update({ coach_reviewed: true }).eq('id', checkinId);
   if(error){ showToast('Could not update: '+error.message, true); return; }
   ci.coachReviewed = true;
+  notifyClient(clientId, 'checkin_reviewed', `Your coach reviewed check-in ${ci.week}`, 'client-history', false);
   showToast('Marked as reviewed');
   render();
 }
 /* ======================================================================
    DAILY TRACKER TABLE (used in check-in form + history)
    ====================================================================== */
+// Averages shown under the daily tracker table (blank days are ignored).
+const DAILY_AVG_KEYS = ['weight','sleepHrs','steps'];
+function dailyAvgText(key, days){
+  const vals = (days||[]).map(d=>parseFloat(d && d[key])).filter(v=>!isNaN(v) && v>0);
+  if(!vals.length) return '–';
+  const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
+  return key==='steps' ? Math.round(avg).toLocaleString() : avg.toFixed(1);
+}
+function refreshDailyAvgs(){
+  if(!document.querySelector('.avg-row')) return;
+  const days = collectDailyTable();
+  DAILY_AVG_KEYS.forEach(k=>{ const el = document.getElementById('davg_'+k); if(el) el.textContent = dailyAvgText(k, days); });
+}
+document.addEventListener('input', e=>{ if(e.target && /^d\d+_/.test(e.target.id||'')) refreshDailyAvgs(); });
 function renderDailyTable(days, editable){
+  days = days || [];
   return `
   <div class="table-wrap"><table class="spreadsheet">
     <tr><th>Day</th>${DAILY_FIELDS.map(f=>`<th>${f.l}</th>`).join('')}</tr>
@@ -1864,6 +2089,10 @@ function renderDailyTable(days, editable){
           return `<td>${inp(id, val, editable, f.t, f.min!==undefined?`min="${f.min}" max="${f.max}"`:(f.step?`step="${f.step}"`:''))}</td>`;
         }).join('')}
       </tr>`).join('')}
+    <tr class="avg-row">
+      <td><b>Avg</b></td>
+      ${DAILY_FIELDS.map(f=> DAILY_AVG_KEYS.includes(f.k) ? `<td><b id="davg_${f.k}" style="color:var(--accent2);">${dailyAvgText(f.k, days)}</b></td>` : '<td></td>').join('')}
+    </tr>
   </table></div>`;
 }
 function collectDailyTable(){
@@ -2107,6 +2336,7 @@ async function saveCardioNotes(clientId){
   const { error } = await sb.from('clients').update({ cardio_notes: notes }).eq('id', clientId);
   if(error){ showToast('Could not save cardio notes: '+error.message, true); return; }
   getClient(clientId).cardioNotes = notes;
+  notifyClient(clientId, 'plan_cardio', 'Your coach updated your cardio & steps', 'client-cardio');
   showToast('Cardio & Steps saved');
 }
 
@@ -2137,6 +2367,7 @@ async function saveMealsForTarget(clientId, dayType, meals, target){
     const { error } = await sb.from('clients').update({ meal_plan: newMealPlan }).eq('id', clientId);
     if(error) return { error };
     c.mealPlan = newMealPlan;
+    notifyClient(clientId, 'plan_meal', 'Your coach updated your meal plan', 'client-meal');
     return {};
   }
   const newLog = { ...c.clientMealLog, [dayType]: meals };
@@ -3259,7 +3490,8 @@ async function trPersist(clientId, msg){
 }
 async function saveTrainingSplit(clientId){
   syncTrainingFromDom(clientId);
-  await trPersist(clientId);
+  const ok = await trPersist(clientId);
+  if(ok) notifyClient(clientId, 'plan_training', 'Your coach updated your training split', 'client-training');
   render();
 }
 async function trArchiveDay(clientId, di){
@@ -3406,12 +3638,14 @@ async function addPedLog(clientId){
   const { data, error } = await sb.from('ped_logs').insert(row).select().single();
   if(error){ showToast('Could not add entry: '+error.message, true); return; }
   c.pedLogs = c.pedLogs || []; c.pedLogs.unshift(data);
+  if(state.role==='coach') notifyClient(clientId, 'plan_ped', 'Your coach updated your PEDs & supplements', 'client-pedsupps');
   render(); showToast('Compound logged');
 }
 async function removePedLog(clientId, id){
   const { error } = await sb.from('ped_logs').delete().eq('id', id);
   if(error){ showToast('Could not remove: '+error.message, true); return; }
   const c = getClient(clientId); c.pedLogs = (c.pedLogs||[]).filter(p=>p.id!==id);
+  if(state.role==='coach') notifyClient(clientId, 'plan_ped', 'Your coach updated your PEDs & supplements', 'client-pedsupps');
   render();
 }
 function startPedRowDrag(e, clientId){
@@ -3442,12 +3676,14 @@ async function addSupplementLog(clientId){
   const { data, error } = await sb.from('supplement_logs').insert(row).select().single();
   if(error){ showToast('Could not add entry: '+error.message, true); return; }
   c.supplementLogs = c.supplementLogs || []; c.supplementLogs.unshift(data);
+  if(state.role==='coach') notifyClient(clientId, 'plan_ped', 'Your coach updated your PEDs & supplements', 'client-pedsupps');
   render(); showToast('Supplement logged');
 }
 async function removeSupplementLog(clientId, id){
   const { error } = await sb.from('supplement_logs').delete().eq('id', id);
   if(error){ showToast('Could not remove: '+error.message, true); return; }
   const c = getClient(clientId); c.supplementLogs = (c.supplementLogs||[]).filter(s=>s.id!==id);
+  if(state.role==='coach') notifyClient(clientId, 'plan_ped', 'Your coach updated your PEDs & supplements', 'client-pedsupps');
   render();
 }
 function startSuppRowDrag(e, clientId){
@@ -3473,6 +3709,7 @@ async function savePedSuppNotes(clientId){
   const { error } = await sb.from('clients').update({ pedsupp_notes: notes }).eq('id', clientId);
   if(error){ showToast('Could not save notes: '+error.message, true); return; }
   getClient(clientId).pedSuppNotes = notes;
+  notifyClient(clientId, 'plan_ped', 'Your coach updated your PEDs & supplements', 'client-pedsupps');
   showToast('Notes saved');
 }
 
@@ -3553,10 +3790,30 @@ function renderDailyTrackerCard(c){
   return `
   <div class="card qform-card" style="margin-bottom:16px;">
     <h3 style="margin-bottom:2px;">Daily Tracker</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:0;">Log this as you go through the week for your own reference.</p>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Log this as you go through the week. Your coach can see it, and it's sent with your weekly check-in.</p>
     ${renderDailyTable(c.dailyDraft||[], true)}
     <button class="btn btn-sm" style="margin-top:12px;" onclick="saveDailyTracker('${c.id}')">Save Daily Tracker</button>
   </div>`;
+}
+function renderDailyTrackerPage(c, isCoach){
+  const past = (c.checkins||[]).slice().reverse();
+  const current = isCoach
+    ? `<div class="card qform-card" style="margin-bottom:16px;">
+        <h3 style="margin-bottom:2px;">This week (in progress)</h3>
+        <p class="muted" style="font-size:12.5px;margin-top:0;">What ${escapeHtml((c.name||'the client').split(' ')[0])} has logged so far this week.</p>
+        ${renderDailyTable(c.dailyDraft||[], false)}
+      </div>`
+    : renderDailyTrackerCard(c);
+  return `
+  ${current}
+  ${past.length ? `<h3 style="margin:18px 0 8px;">Previous weeks</h3>` : ''}
+  ${past.map(ci=>`
+    <details class="card collapsible" style="margin-bottom:10px;">
+      <summary>Week ${ci.week} &mdash; ${ci.date||''}
+        <span class="muted" style="font-size:12px;margin-left:8px;">avg weight ${dailyAvgText('weight',ci.days)} kg &middot; sleep ${dailyAvgText('sleepHrs',ci.days)} h &middot; steps ${dailyAvgText('steps',ci.days)}</span>
+      </summary>
+      <div style="margin-top:12px;">${renderDailyTable(ci.days||[], false)}</div>
+    </details>`).join('')}`;
 }
 function renderClientInfoReadCard(c){
   const days = (c.checkinDays && c.checkinDays.length) ? c.checkinDays : [c.checkinDay||'Monday'];
@@ -3576,7 +3833,6 @@ function renderClientOwnDashboard(c){
   const daysLabel = days.map(d=>d.slice(0,3)).join(', ');
   if(!lc){
     return `<div class="card" style="margin-bottom:16px;"><div class="empty">You haven't submitted a check-in yet — head to PBP Check-In in the sidebar to get started.</div></div>
-    ${renderDailyTrackerCard(c)}
     ${renderClientInfoReadCard(c)}`;
   }
   const delta=weightChange(c);
@@ -3589,7 +3845,6 @@ function renderClientOwnDashboard(c){
     <div class="card"><div class="stat-label">Overall Adherence Last Week</div><div class="stat-value">${(lc.overallAdherence||0).toFixed(1)}/5</div></div>
     <div class="card"><div class="stat-label">Next Check-In Due</div><div class="stat-value" style="font-size:18px;">${escapeHtml(daysLabel)}</div></div>
   </div>
-  ${renderDailyTrackerCard(c)}
   <div class="card" style="margin-bottom:16px;"><h3>Weight Trend</h3><div class="chart-wrap"><canvas id="weightChart"></canvas></div></div>
   ${renderClientInfoReadCard(c)}`;
 }
@@ -3642,12 +3897,18 @@ function renderCheckinQuestionInput(q){
   return textQ(id, q.label, q.placeholder);
 }
 function renderWeeklyCheckinForm(c){
+  const editCi = state.editingCheckinId ? c.checkins.find(x=>x.id===state.editingCheckinId) : null;
+  if(state.editingCheckinId && (!editCi || editCi.coachReviewed)){ state.editingCheckinId = null; }
+  const ci = state.editingCheckinId ? editCi : null;
+  const existingPhotos = ci ? [...(ci.photos.front||[]), ...(ci.photos.side||[]), ...(ci.photos.back||[])] : [];
   return `
   <div class="card qform-card">
-    <h3 style="margin-bottom:2px;">PBP Checkin — Week ${c.checkins.length+1}</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:0;">Please submit your answers below to complete your check in.</p>
-    <div class="field" style="max-width:220px;"><label>Check-In Date</label><div id="pbp_date" style="padding:9px 0;font-size:13.5px;color:var(--text);">${new Date().toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'})}</div></div>
+    <h3 style="margin-bottom:2px;">${ci ? `Edit Check-In ${ci.week}` : `PBP Checkin — Week ${c.checkins.length+1}`}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">${ci ? 'You can change your answers until your coach reviews this check-in.' : 'Please submit your answers below to complete your check in.'}</p>
+    <div class="field" style="max-width:220px;"><label>Check-In Date</label><div id="pbp_date" style="padding:9px 0;font-size:13.5px;color:var(--text);">${ci && ci.date ? new Date(ci.date+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}) : new Date().toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'})}</div></div>
   </div>
+
+  ${ci ? `<div class="card qform-card"><h3 style="margin-bottom:2px;">Daily Tracker</h3><p class="muted" style="font-size:12.5px;margin-top:0;">The week's daily log that was sent with this check-in.</p>${renderDailyTable(ci.days||[], true)}</div>` : ''}
 
   <div class="card qform-card">
     ${CHECKIN_QUESTIONS.map(q=>renderCheckinQuestionInput(q)).join('')}
@@ -3656,13 +3917,90 @@ function renderWeeklyCheckinForm(c){
   <div class="card qform-card">
     <h3 style="margin-bottom:2px;">Progress Photos</h3>
     <p class="muted" style="font-size:12.5px;margin-top:0;">Tap + to add one or more photos per angle.</p>
+    ${existingPhotos.length ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Already uploaded (${existingPhotos.length}) &mdash; new photos you add are included as well:</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${existingPhotos.map(u=>`<div class="photo-thumb" style="background-image:url(${u});width:64px;height:64px;"></div>`).join('')}</div>` : ''}
     <div class="row" style="gap:24px;">
       ${uploadBox('front','Front')} ${uploadBox('side','Side')} ${uploadBox('back','Back')}
     </div>
   </div>
 
-  <button class="btn" id="checkinSubmitBtn" onclick="submitWeeklyCheckin('${c.id}')">Submit Check-In</button>
+  ${ci
+    ? `<div style="display:flex;gap:10px;"><button class="btn" id="checkinSubmitBtn" onclick="updateWeeklyCheckin('${c.id}')">Save Changes</button><button class="btn btn-ghost" type="button" onclick="cancelEditCheckin()">Cancel</button></div>`
+    : `<button class="btn" id="checkinSubmitBtn" onclick="submitWeeklyCheckin('${c.id}')">Submit Check-In</button>`}
   `;
+}
+function startEditCheckin(checkinId){
+  checkinPhotoDrafts = {front:[],side:[],back:[]};
+  state.editingCheckinId = checkinId;
+  state.page = 'client-checkin';
+  render();
+  window.scrollTo(0,0);
+}
+function cancelEditCheckin(){
+  state.editingCheckinId = null;
+  checkinPhotoDrafts = {front:[],side:[],back:[]};
+  state.page = 'client-history';
+  render();
+}
+function prefillCheckinEdit(){
+  const c = getClient(state.currentClientId);
+  const ci = c && c.checkins.find(x=>x.id===state.editingCheckinId);
+  if(!ci) return;
+  CHECKIN_QUESTIONS.forEach(q=>{
+    const el = document.getElementById('pbp_'+q.key);
+    const v = ci[q.key];
+    if(!el || v===undefined || v===null) return;
+    el.value = v;
+    if(q.type==='rating'){
+      const group = el.parentElement.querySelector('.rating-btn-group');
+      if(group) group.querySelectorAll('.rating-btn').forEach(b=>b.classList.toggle('active', b.textContent.trim()===String(v)));
+    }
+  });
+}
+async function updateWeeklyCheckin(clientId){
+  const c = getClient(clientId);
+  const ci = c && c.checkins.find(x=>x.id===state.editingCheckinId);
+  if(!ci) return;
+  const weightEl = document.getElementById('pbp_weight');
+  if(weightEl && !weightEl.value){ showToast('Please enter your weight', true); return; }
+  const btn = document.getElementById('checkinSubmitBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  const fail = (msg)=>{ showToast(msg, true); if(btn){ btn.disabled=false; btn.textContent='Save Changes'; } };
+
+  // Re-check with the database that the coach hasn't reviewed it in the meantime.
+  const { data: row, error: rerr } = await sb.from('checkins').select('payload, coach_reviewed').eq('id', ci.id).single();
+  if(rerr || !row){ fail('Could not load this check-in — try again.'); return; }
+  if(row.coach_reviewed){ ci.coachReviewed = true; state.editingCheckinId = null; showToast('Your coach has just reviewed this check-in, so it is now locked.', true); render(); return; }
+
+  let fp, sp, bp;
+  try{
+    [fp, sp, bp] = await Promise.all(['front','side','back'].map(a=>uploadPhotosForAngle(clientId, ci.week, a)));
+  }catch(e){ fail(e.message + ' — nothing was saved, please try again.'); return; }
+
+  const payload = Object.assign({}, row.payload || {});
+  payload.days = collectDailyTable();
+  const old = ci.photoPaths || { front:[], side:[], back:[] };
+  payload.photos = { front:[...old.front, ...fp], side:[...old.side, ...sp], back:[...old.back, ...bp] };
+  CHECKIN_QUESTIONS.forEach(q=>{
+    const el = document.getElementById('pbp_'+q.key);
+    if(!el) return;
+    if(q.type==='rating') payload[q.key] = parseInt(el.value);
+    else if(q.key==='weight') payload[q.key] = parseFloat(el.value) || 0;
+    else payload[q.key] = el.value;
+  });
+  const { error } = await sb.from('checkins').update({ payload }).eq('id', ci.id);
+  if(error){ fail('Could not save changes: '+error.message); return; }
+
+  checkinPhotoDrafts = {front:[],side:[],back:[]};
+  state.editingCheckinId = null;
+  try{
+    const fresh = await fetchClientFull(clientId);
+    const idx = clients.findIndex(x=>x.id===clientId);
+    if(idx>-1) clients[idx] = fresh;
+  }catch(e){ console.warn(e); }
+  notifyCoaches(clientId, 'checkin_edited', `${c.name} edited check-in ${ci.week}`);
+  showToast('Check-in updated');
+  state.page = 'client-history';
+  render();
 }
 let checkinPhotoDrafts = {front:[],side:[],back:[]};
 function uploadBox(key,label){
@@ -3717,7 +4055,7 @@ async function uploadPhotosForAngle(clientId, week, angle){
     const blob = await (await fetch(urls[i])).blob();
     const path = `${clientId}/week${week}-${angle}-${uid()}.jpg`;
     const { error } = await sb.storage.from('progress-photos').upload(path, blob, { contentType:'image/jpeg' });
-    if(error){ showToast(`Could not upload a ${angle} photo: ${error.message}`, true); continue; }
+    if(error){ throw new Error(`Could not upload a ${angle} photo: ${error.message}`); }
     paths.push(path);
   }
   return paths;
@@ -3735,11 +4073,18 @@ async function submitWeeklyCheckin(clientId){
   const week = c.checkins.length+1;
   const date = new Date().toISOString().slice(0,10);
 
-  const [frontPaths, sidePaths, backPaths] = await Promise.all([
-    uploadPhotosForAngle(clientId, week, 'front'),
-    uploadPhotosForAngle(clientId, week, 'side'),
-    uploadPhotosForAngle(clientId, week, 'back')
-  ]);
+  let frontPaths, sidePaths, backPaths;
+  try{
+    [frontPaths, sidePaths, backPaths] = await Promise.all([
+      uploadPhotosForAngle(clientId, week, 'front'),
+      uploadPhotosForAngle(clientId, week, 'side'),
+      uploadPhotosForAngle(clientId, week, 'back')
+    ]);
+  }catch(e){
+    showToast(e.message + ' — nothing was submitted, please try again.', true);
+    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Check-In'; }
+    return;
+  }
 
   const payload = {
     days,
@@ -3774,6 +4119,7 @@ async function submitWeeklyCheckin(clientId){
   await sb.from('daily_drafts').delete().eq('client_id', clientId);
   c.dailyDraft = [];
 
+  notifyCoaches(clientId, 'checkin_submitted', `${c.name} submitted check-in ${week}`);
   showToast('Check-in submitted to your coach!');
   state.page='client-history';
   render();
