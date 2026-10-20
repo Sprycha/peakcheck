@@ -83,6 +83,15 @@
   tr:last-child td{border-bottom:none;}
   .table-wrap{overflow-x:auto;}
   .spreadsheet td{padding:4px 5px;}
+  table.daily-resizable{table-layout:fixed;width:auto;min-width:100%;}
+  table.daily-resizable th{white-space:normal;word-break:break-word;position:relative;vertical-align:bottom;padding-right:12px;}
+  table.daily-resizable td{vertical-align:top;overflow:hidden;}
+  table.daily-resizable input,table.daily-resizable select,table.daily-resizable textarea{width:100%;min-width:0;box-sizing:border-box;}
+  table.daily-resizable textarea{min-height:34px;height:34px;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;font:inherit;}
+  .col-grip{position:absolute;top:0;right:0;width:9px;height:100%;cursor:col-resize;user-select:none;touch-action:none;}
+  .col-grip::after{content:'';position:absolute;top:20%;bottom:20%;right:3px;width:2px;background:var(--border);border-radius:1px;}
+  .col-grip:hover::after,.col-grip.active::after{background:var(--accent);}
+  .col-hint{font-size:11.5px;color:var(--sub);margin:0 0 6px;}
 
   .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:18px;flex-wrap:wrap;}
   .tab{padding:10px 16px;font-size:13.5px;font-weight:700;color:var(--sub);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px;}
@@ -2074,11 +2083,63 @@ function refreshDailyAvgs(){
   DAILY_AVG_KEYS.forEach(k=>{ const el = document.getElementById('davg_'+k); if(el) el.textContent = dailyAvgText(k, days); });
 }
 document.addEventListener('input', e=>{ if(e.target && /^d\d+_/.test(e.target.id||'')) refreshDailyAvgs(); });
+// Resizable columns: widths saved per field in this browser.
+const DAILY_COL_DEFAULT = 96, DAILY_COL_MIN = 44, DAILY_COL_MAX = 480;
+function dailyColWidths(){
+  try { return JSON.parse(localStorage.getItem('peakcheck_daily_cols')||'{}') || {}; } catch(e){ return {}; }
+}
+function saveDailyColWidth(key, w){
+  try { const m = dailyColWidths(); m[key] = w; localStorage.setItem('peakcheck_daily_cols', JSON.stringify(m)); } catch(e){}
+}
+function dailyColW(key){
+  const w = dailyColWidths()[key];
+  return (typeof w==='number' && w>=DAILY_COL_MIN) ? Math.min(w, DAILY_COL_MAX) : (key==='_day' ? 52 : DAILY_COL_DEFAULT);
+}
+function autoGrowTextareas(root){
+  (root||document).querySelectorAll('table.daily-resizable textarea').forEach(t=>{
+    t.style.height='auto'; t.style.height = Math.max(34, t.scrollHeight)+'px';
+  });
+}
+document.addEventListener('input', e=>{ if(e.target && e.target.tagName==='TEXTAREA' && e.target.closest && e.target.closest('table.daily-resizable')) autoGrowTextareas(e.target.closest('table')); });
+document.addEventListener('pointerdown', e=>{
+  const g = e.target && e.target.closest && e.target.closest('.col-grip');
+  if(!g) return;
+  e.preventDefault();
+  const tbl = g.closest('table');
+  const key = g.dataset.col;
+  const col = tbl.querySelector(`col[data-col="${key}"]`);
+  if(!col) return;
+  const startX = e.clientX, startW = parseFloat(col.style.width)||DAILY_COL_DEFAULT;
+  g.classList.add('active');
+  const move = ev=>{
+    const w = Math.max(DAILY_COL_MIN, Math.min(DAILY_COL_MAX, Math.round(startW + ev.clientX - startX)));
+    // Apply to every daily table on the page so they stay in sync.
+    document.querySelectorAll(`table.daily-resizable col[data-col="${key}"]`).forEach(c=>{ c.style.width = w+'px'; });
+    autoGrowTextareas();
+  };
+  const up = ev=>{
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    g.classList.remove('active');
+    saveDailyColWidth(key, parseFloat(col.style.width)||startW);
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+});
+function resetDailyColWidths(){
+  try { localStorage.removeItem('peakcheck_daily_cols'); } catch(e){}
+  render();
+}
 function renderDailyTable(days, editable){
   days = days || [];
+  setTimeout(()=>autoGrowTextareas(), 0);
+  const cols = [{k:'_day'}].concat(DAILY_FIELDS).map(f=>`<col data-col="${f.k}" style="width:${dailyColW(f.k)}px">`).join('');
+  const grip = k=>`<span class="col-grip" data-col="${k}" title="Drag to resize"></span>`;
   return `
-  <div class="table-wrap"><table class="spreadsheet">
-    <tr><th>Day</th>${DAILY_FIELDS.map(f=>`<th>${f.l}</th>`).join('')}</tr>
+  <div class="col-hint">Drag the edge of a column heading to resize it. <a href="#" onclick="resetDailyColWidths();return false;">Reset widths</a></div>
+  <div class="table-wrap"><table class="spreadsheet daily-resizable">
+    <colgroup>${cols}</colgroup>
+    <tr><th>Day${grip('_day')}</th>${DAILY_FIELDS.map(f=>`<th>${f.l}${grip(f.k)}</th>`).join('')}</tr>
     ${DAY_LABELS.map((label,i)=>`
       <tr>
         <td><b>${label}</b></td>
@@ -2086,6 +2147,7 @@ function renderDailyTable(days, editable){
           const val = days[i] ? days[i][f.k] : '';
           const id = `d${i}_${f.k}`;
           if(f.t==='select') return `<td>${sel(id, f.opts, val, editable)}</td>`;
+          if(f.t==='text') return `<td><textarea id="${id}" rows="1" ${editable?'':'disabled'}>${String(val===undefined||val===null?'':val).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea></td>`;
           return `<td>${inp(id, val, editable, f.t, f.min!==undefined?`min="${f.min}" max="${f.max}"`:(f.step?`step="${f.step}"`:''))}</td>`;
         }).join('')}
       </tr>`).join('')}
