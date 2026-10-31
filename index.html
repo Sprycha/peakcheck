@@ -253,7 +253,10 @@
   .food-picker-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);}
   .food-picker-row:last-child{border-bottom:none;}
   .food-picker-row.selected{background:var(--panel2);}
-  .food-picker-selected{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;}
+  .food-picker-selected{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;position:sticky;bottom:0;box-shadow:0 -6px 12px rgba(0,0,0,.25);}
+  .fp-macros{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px;}
+  .fp-ml{font-size:11.5px;color:var(--sub);}
+  .fp-mv{font-size:20px;font-weight:800;line-height:1.2;}
   .tab-add{color:var(--accent2);}
   .checkin-feedback-thread{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;max-height:340px;overflow-y:auto;}
   .checkin-msg{display:flex;flex-direction:column;max-width:78%;}
@@ -2799,16 +2802,33 @@ function foodPickerHTML(){
           <button type="button" class="btn-sm ${foodPickerCtx.selected && foodPickerCtx.selected.food===f.food?'':'btn-ghost'}" onclick="selectFoodInPicker('${f.food.replace(/'/g,"\\'")}')">${foodPickerCtx.selected && foodPickerCtx.selected.food===f.food ? 'Selected' : 'Select'}</button>
         </div>`).join('')}
       </div>
-      ${foodPickerCtx.selected ? `
+      ${foodPickerCtx.selected ? (()=>{ const m = foodPickerMacros(foodPickerCtx.selected, foodPickerCtx.qty); return `
       <div class="food-picker-selected">
         <div class="muted" style="font-size:12px;margin-bottom:8px;">Selected: <b style="color:var(--text);">${escapeHtml(foodPickerCtx.selected.food)}</b></div>
+        <div class="fp-macros">
+          <div><div class="fp-ml">Total Kcal</div><div class="fp-mv" id="fpm_cals" style="color:#4f7cff;">${m.cals}kcal</div></div>
+          <div><div class="fp-ml">Total Protein</div><div class="fp-mv" id="fpm_protein" style="color:#16a870;">${m.protein}g</div></div>
+          <div><div class="fp-ml">Total Carbs</div><div class="fp-mv" id="fpm_carbs" style="color:#f59e0b;">${m.carbs}g</div></div>
+          <div><div class="fp-ml">Total Fat</div><div class="fp-mv" id="fpm_fats" style="color:#d6249f;">${m.fats}g</div></div>
+        </div>
         <div class="row" style="align-items:flex-end;">
-          <div class="field"><label>${foodPickerCtx.selected.unit==='unit'?'Qty':'Grams'}</label><input type="number" id="foodPickerQty" value="${foodPickerCtx.qty||''}" oninput="foodPickerCtx.qty=this.value"></div>
+          <div class="field"><label>${foodPickerCtx.selected.unit==='unit'?'Qty':'Amount (g)'}</label><input type="number" inputmode="decimal" id="foodPickerQty" value="${foodPickerCtx.qty||''}" oninput="foodPickerCtx.qty=this.value;updateFoodPickerMacros()"></div>
           <div class="field" style="flex:0 0 auto;"><button type="button" class="btn btn-sm" onclick="confirmFoodPicker()">${editing?'Save Changes':'Add to Meal'}</button></div>
         </div>
-      </div>` : ''}
+      </div>`; })() : ''}
     </div>
   </div>`;
+}
+function foodPickerMacros(f, qty){
+  const q = parseFloat(qty)||0;
+  const factor = q / (f.base||100);
+  return { cals:Math.round((f.cals||0)*factor), protein:+((f.protein||0)*factor).toFixed(1), carbs:+((f.carbs||0)*factor).toFixed(1), fats:+((f.fats||0)*factor).toFixed(1) };
+}
+function updateFoodPickerMacros(){
+  if(!foodPickerCtx || !foodPickerCtx.selected) return;
+  const m = foodPickerMacros(foodPickerCtx.selected, foodPickerCtx.qty);
+  const set = (id, t)=>{ const el=document.getElementById(id); if(el) el.textContent=t; };
+  set('fpm_cals', m.cals+'kcal'); set('fpm_protein', m.protein+'g'); set('fpm_carbs', m.carbs+'g'); set('fpm_fats', m.fats+'g');
 }
 function updateFoodPickerQuery(v){
   foodPickerQuery = v;
@@ -2822,6 +2842,7 @@ function selectFoodInPicker(foodName){
   const f = NUTRITION_DB.find(x=>x.food===foodName);
   if(!f || !foodPickerCtx) return;
   foodPickerCtx.selected = f;
+  if(!foodPickerCtx.qty) foodPickerCtx.qty = String(f.base||100); // start at the base amount so macros show straight away
   const el = document.getElementById('foodPickerOverlay');
   if(el) el.outerHTML = foodPickerHTML();
 }
