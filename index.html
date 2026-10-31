@@ -254,6 +254,12 @@
   .food-picker-row:last-child{border-bottom:none;}
   .food-picker-row.selected{background:var(--panel2);}
   .food-picker-selected{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;position:sticky;bottom:0;box-shadow:0 -6px 12px rgba(0,0,0,.25);}
+  .supp-group{margin-bottom:14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel2);}
+  .supp-group-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(127,127,127,.12);border-bottom:1px solid var(--border);}
+  .supp-group-title{font-weight:800;font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);}
+  .supp-group-count{font-size:11.5px;color:var(--sub);}
+  .supp-group .table-wrap{padding:0 6px;}
+  .supp-group tr:last-child td{border-bottom:none;}
   .fp-macros{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px;}
   .fp-ml{font-size:11.5px;color:var(--sub);}
   .fp-mv{font-size:20px;font-weight:800;line-height:1.2;}
@@ -3652,6 +3658,15 @@ function pedTag(drugName){
   const cls = 'tag-'+cat.toLowerCase();
   return `<span class="compound-tag ${cls}">${cat.toUpperCase()}</span>`;
 }
+const SUPP_TIMING_ORDER = ['Fasted','Morning','Meal 1','Any Meal','Pre Workout','Post Workout','Evening','Pre Bed'];
+// Groups the stack by timing (known timings in day order, then any custom ones), keeping each group's saved order.
+function suppGroupsOrdered(supps){
+  const map = new Map();
+  supps.forEach(s=>{ const t = s.timing || 'Unspecified'; if(!map.has(t)) map.set(t, []); map.get(t).push(s); });
+  const known = SUPP_TIMING_ORDER.filter(t=>map.has(t));
+  const other = Array.from(map.keys()).filter(t=>!SUPP_TIMING_ORDER.includes(t));
+  return known.concat(other).map(t=>[t, map.get(t)]);
+}
 function renderPedSupplementsTab(c, isCoach){
   const peds = c.pedLogs || [];
   const supps = c.supplementLogs || [];
@@ -3682,20 +3697,23 @@ function renderPedSupplementsTab(c, isCoach){
   <div class="card" style="margin-bottom:16px;">
     <h3>Supplement Stack Log</h3>
     ${!isCoach ? `<p class="muted" style="font-size:12.5px;margin-top:0;">Set by your coach — for your reference only.</p>` : ''}
-    ${supps.length===0 ? `<div class="empty">No supplements logged yet.</div>` : `
-    <div class="table-wrap"><table>
-      <tr>${isCoach&&supps.length>1?'<th></th>':''}<th>Supplement</th><th>Dose</th><th>Timing</th>${isCoach?'<th></th>':''}</tr>
-      <tbody class="supp-log-rows" data-client-id="${c.id}">
-      ${supps.map(s=>`<tr>${isCoach&&supps.length>1?`<td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startSuppRowDrag(event,'${c.id}')" aria-label="Drag to reorder">&#10022;&#10022;</span></td>`:''}<td>${s.drug}</td><td>${s.dose||''}</td><td>${s.timing||''}</td>${isCoach?`<td><button class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeSupplementLog('${c.id}','${s.id}')">Remove</button></td>`:''}</tr>`).join('')}
-      </tbody>
-    </table></div>`}
+    ${supps.length===0 ? `<div class="empty">No supplements logged yet.</div>` : suppGroupsOrdered(supps).map(([timing, items])=>`
+    <div class="supp-group">
+      <div class="supp-group-head"><span class="supp-group-title">${escapeHtml(timing)}</span><span class="supp-group-count">${items.length}</span></div>
+      <div class="table-wrap"><table>
+        <tr>${isCoach&&items.length>1?'<th></th>':''}<th>Supplement</th><th>Dose</th>${isCoach?'<th></th>':''}</tr>
+        <tbody class="supp-log-rows" data-client-id="${c.id}" data-timing="${escapeHtml(timing)}">
+        ${items.map(s=>`<tr>${isCoach&&items.length>1?`<td style="width:1%;padding-right:0;"><span class="drag-handle" onpointerdown="startSuppRowDrag(event,'${c.id}')" aria-label="Drag to reorder">&#10022;&#10022;</span></td>`:''}<td>${escapeHtml(s.drug)}</td><td>${escapeHtml(s.dose||'')}</td>${isCoach?`<td style="text-align:right;"><button class="btn-sm btn-ghost" style="color:var(--red);" onclick="removeSupplementLog('${c.id}','${s.id}')">Remove</button></td>`:''}</tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>`).join('')}
     ${isCoach ? `
     <div class="pedsupp-add-panel">
       <div class="pedsupp-add-title">Add Supplement</div>
       <div class="row pedsupp-add-row">
         <div class="field"><label>Supplement</label><input list="suppList" id="sl_drug" placeholder="e.g. Vitamin D3" autocomplete="off"></div>
         <div class="field"><label>Dose</label><input id="sl_dose" placeholder="e.g. 5000IU" autocomplete="off"></div>
-        <div class="field"><label>Timing</label><select id="sl_timing">${['Fasted','Meal 1','Any Meal','Pre Bed'].map(t=>`<option>${t}</option>`).join('')}</select></div>
+        <div class="field"><label>Timing</label><select id="sl_timing">${SUPP_TIMING_ORDER.map(t=>`<option>${t}</option>`).join('')}</select></div>
       </div>
       <button class="btn btn-sm" onclick="addSupplementLog('${c.id}')">Add Entry</button>
     </div>` : ''}
@@ -3774,13 +3792,25 @@ function startSuppRowDrag(e, clientId){
   if(!row) return;
   const container = row.closest('.supp-log-rows');
   if(!container) return;
-  startRowDrag(e, container, 'tr', (from,to)=>reorderSupplementLog(clientId, from, to));
+  const timing = container.dataset.timing;
+  startRowDrag(e, container, 'tr', (from,to)=>reorderSupplementLog(clientId, from, to, timing));
 }
-async function reorderSupplementLog(clientId, fromIdx, toIdx){
+async function reorderSupplementLog(clientId, fromIdx, toIdx, timing){
   const c = getClient(clientId);
   const list = c.supplementLogs;
-  const [moved] = list.splice(fromIdx,1);
-  list.splice(toIdx,0,moved);
+  if(timing!==undefined){
+    // fromIdx/toIdx are positions inside one timing group: reorder the group, keep other groups where they are.
+    const key = s=>(s.timing||'Unspecified');
+    const group = list.filter(s=>key(s)===timing);
+    const [mv] = group.splice(fromIdx,1);
+    group.splice(toIdx,0,mv);
+    let gi = 0;
+    const rebuilt = list.map(s=> key(s)===timing ? group[gi++] : s);
+    list.splice(0, list.length, ...rebuilt);
+  } else {
+    const [moved] = list.splice(fromIdx,1);
+    list.splice(toIdx,0,moved);
+  }
   list.forEach((s,i)=>{ s.sort_order = i; });
   const results = await Promise.all(list.map(s=>sb.from('supplement_logs').update({sort_order:s.sort_order}).eq('id',s.id)));
   const errored = results.find(r=>r.error);
